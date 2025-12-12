@@ -4,6 +4,7 @@ import { KuaishouService } from '../services/kuaishouService.js'
 import { RoiService } from '../services/roiService.js'
 import { CountdownService } from '../services/countdownService.js'
 import { WalletService } from '../services/walletService.js'
+import { RechargeService } from '../services/rechargeService.js' // Import
 
 export function registerIPC(mainWindow) {
   const send = (channel, payload) => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.webContents.send(channel, payload) } }
@@ -12,6 +13,8 @@ export function registerIPC(mainWindow) {
   const ksSvc = new KuaishouService()
   const roiSvc = new RoiService()
   const walletSvc = new WalletService()
+  // Instantiate RechargeService
+  const rechargeSvc = new RechargeService(mainWindow)
 
   const cdSvc = new CountdownService({ usersSvc, ksSvc, roiSvc, walletSvc, send })
 
@@ -65,17 +68,13 @@ export function registerIPC(mainWindow) {
   ipcMain.handle('refresh_data', async () => {
     try {
       const users = await usersSvc.getAllUsers(false)
-      // 发送用户基础数据，但不触发时间更新（前端已处理）
       send('users_data', { type: 'users_data', status: 'success', data: users })
 
-      // 修改：手动刷新时，仅并发请求 ROI 和 余额，不请求快手核心数据（GMV、消耗等）
       const [rois, wallets] = await Promise.all([
         roiSvc.getAllRoiData(users),
         walletSvc.getAllWalletData(users)
       ])
 
-      // 标记 trigger: 'manual'，前端根据此标记不更新时间
-      // 注意：这里不再发送 kuaishou_data，因此页面上的 GMV/消耗 等字段不会变动
       send('roi_data', { type: 'roi_data', status: 'success', data: rois, trigger: 'manual' })
       send('wallet_data', { type: 'wallet_data', status: 'success', data: wallets, trigger: 'manual' })
 
@@ -119,5 +118,26 @@ export function registerIPC(mainWindow) {
   ipcMain.handle('reset_roi_countdown', async () => {
     cdSvc.resetRoi(15)
     return { type: 'countdown_state', status: 'success', data: cdSvc.getState() }
+  })
+
+  // === New Recharge Route ===
+  ipcMain.handle('create_recharge', async (_event, payload) => {
+    try {
+      const { uid, amount } = payload
+      const user = await usersSvc.getUserByUid(uid)
+      if (!user) throw new Error('用户不存在')
+
+      const result = await rechargeSvc.initiateRecharge(user, amount)
+
+      return {
+        status: 'success',
+        data: result
+      }
+    } catch (e) {
+      return {
+        status: 'error',
+        message: e.message || '充值发起失败'
+      }
+    }
   })
 }
