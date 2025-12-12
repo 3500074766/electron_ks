@@ -3,13 +3,18 @@ import { UserService } from '../services/userService.js'
 import { KuaishouService } from '../services/kuaishouService.js'
 import { RoiService } from '../services/roiService.js'
 import { CountdownService } from '../services/countdownService.js'
+import { WalletService } from '../services/walletService.js' // 引入新服务
 
 export function registerIPC(mainWindow) {
   const send = (channel, payload) => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.webContents.send(channel, payload) } }
+
   const usersSvc = new UserService()
   const ksSvc = new KuaishouService()
   const roiSvc = new RoiService()
-  const cdSvc = new CountdownService({ usersSvc, ksSvc, roiSvc, send })
+  const walletSvc = new WalletService() // 实例化
+
+  // 将 walletSvc 注入到 CountdownService 中，以便冷启动时调用
+  const cdSvc = new CountdownService({ usersSvc, ksSvc, roiSvc, walletSvc, send })
 
   mainWindow.webContents.on('did-finish-load', () => {
     send('connection_established', { type: 'connection_established', status: 'success' })
@@ -44,15 +49,38 @@ export function registerIPC(mainWindow) {
     }
   })
 
+  // 新增：获取所有余额的 IPC 接口
+  ipcMain.handle('get_all_wallet_data', async () => {
+    try {
+      const users = await usersSvc.getAllUsers(false)
+      const wallets = await walletSvc.getAllWalletData(users)
+      const data = { type: 'wallet_data', status: 'success', data: wallets }
+      send('wallet_data', data)
+      return data
+    } catch (e) {
+      const err = { type: 'wallet_data', status: 'error', code: 500, message: String(e?.message || e) }
+      send('wallet_data', err)
+      return err
+    }
+  })
+
   ipcMain.handle('refresh_data', async () => {
     try {
       cdSvc.resetAfterManualRefresh()
       const users = await usersSvc.getAllUsers(false)
       send('users_data', { type: 'users_data', status: 'success', data: users })
-      const ks = await ksSvc.getAllKuaishouData(users)
+
+      // 并发执行三个请求：概览、ROI、余额
+      const [ks, rois, wallets] = await Promise.all([
+        ksSvc.getAllKuaishouData(users),
+        roiSvc.getAllRoiData(users),
+        walletSvc.getAllWalletData(users)
+      ])
+
       send('kuaishou_data', { type: 'kuaishou_data', status: 'success', data: ks })
-      const rois = await roiSvc.getAllRoiData(users)
       send('roi_data', { type: 'roi_data', status: 'success', data: rois })
+      send('wallet_data', { type: 'wallet_data', status: 'success', data: wallets }) // 发送余额数据
+
       return { type: 'refresh_data', status: 'success' }
     } catch (e) {
       const err = { type: 'error', status: 'error', code: 500, message: String(e?.message || e) }

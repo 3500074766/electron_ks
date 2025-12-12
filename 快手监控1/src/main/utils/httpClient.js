@@ -13,15 +13,30 @@ export class HttpClient {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
   }
 
+  // 辅助方法：构建请求配置，统一处理 Cookie
+  _buildConfig({ headers, cookies, params }) {
+    const config = {
+      headers: headers || {},
+      params,
+      withCredentials: !!cookies
+    }
+
+    if (cookies) {
+      const cookieStr = Object.entries(cookies)
+        .map(([k, v]) => `${k}=${v}`)
+        .join('; ')
+      config.headers['Cookie'] = cookieStr
+    }
+
+    return config
+  }
+
   async post({ url, data, headers, cookies, maxRetries = MAX_RETRIES }) {
     let attempt = 0
     while (attempt <= maxRetries) {
       try {
-        const res = await this.instance.post(url, data, {
-          headers,
-          withCredentials: !!cookies,
-          ...(cookies ? { headers: { ...(headers || {}), Cookie: Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ') } } : {})
-        })
+        const config = this._buildConfig({ headers, cookies })
+        const res = await this.instance.post(url, data, config)
         return [true, res.data]
       } catch (e) {
         attempt++
@@ -35,7 +50,9 @@ export class HttpClient {
     let attempt = 0
     while (attempt <= maxRetries) {
       try {
-        const res = await this.instance.get(url, { params, headers, withCredentials: !!cookies })
+        // 修复：使用 _buildConfig 确保 GET 请求也能带上 Cookie
+        const config = this._buildConfig({ headers, cookies, params })
+        const res = await this.instance.get(url, config)
         return [true, res.data]
       } catch (e) {
         attempt++

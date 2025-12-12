@@ -11,6 +11,7 @@ const api = {
   off: (channel, listener) => ipcRenderer.removeListener(channel, listener),
   getAllKuaishouData: () => ipcRenderer.invoke('get_all_kuaishou_data'),
   getAllRoiData: () => ipcRenderer.invoke('get_all_roi_data'),
+  getAllWalletData: () => ipcRenderer.invoke('get_all_wallet_data'), // 新增 API
   refreshData: () => ipcRenderer.invoke('refresh_data', { action: 'refresh_data' }),
   updateInterval: (interval) => ipcRenderer.invoke('update_interval', { interval }),
   updateRoi: (payload) => ipcRenderer.invoke('update_roi', payload),

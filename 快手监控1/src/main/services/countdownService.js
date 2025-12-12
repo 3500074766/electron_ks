@@ -3,10 +3,11 @@ import fs from 'fs'
 import { join } from 'path'
 
 export class CountdownService {
-  constructor({ usersSvc, ksSvc, roiSvc, send }) {
+  constructor({ usersSvc, ksSvc, roiSvc, walletSvc, send }) { // 注入 walletSvc
     this.usersSvc = usersSvc
     this.ksSvc = ksSvc
     this.roiSvc = roiSvc
+    this.walletSvc = walletSvc // 保存引用
     this.send = send
     this.refreshIntervalMinutes = 10
     this.nextKuaishouAt = Date.now() + this.refreshIntervalMinutes * 60 * 1000
@@ -121,17 +122,29 @@ export class CountdownService {
       const users = await this.usersSvc.getAllUsers(false)
       this.send('users_data', { type: 'users_data', status: 'success', data: users })
       if (Array.isArray(users) && users.length > 0) {
-        try {
-          const ks = await this.ksSvc.getAllKuaishouData(users)
+        // 使用 Promise.allSettled 或简单的 try-catch 块来并行执行，互不影响
+
+        // 1. 获取概览数据
+        this.ksSvc.getAllKuaishouData(users).then(ks => {
           this.send('kuaishou_data', { type: 'kuaishou_data', status: 'success', data: ks })
-        } catch (e) {
+        }).catch(e => {
           this.send('kuaishou_data', { type: 'kuaishou_data', status: 'error', code: 500, message: String(e?.message || e) })
-        }
-        try {
-          const rois = await this.roiSvc.getAllRoiData(users)
+        })
+
+        // 2. 获取 ROI 数据
+        this.roiSvc.getAllRoiData(users).then(rois => {
           this.send('roi_data', { type: 'roi_data', status: 'success', data: rois })
-        } catch (e) {
+        }).catch(e => {
           this.send('roi_data', { type: 'roi_data', status: 'error', code: 500, message: String(e?.message || e) })
+        })
+
+        // 3. 获取余额数据 (新增)
+        if (this.walletSvc) {
+          this.walletSvc.getAllWalletData(users).then(wallets => {
+            this.send('wallet_data', { type: 'wallet_data', status: 'success', data: wallets })
+          }).catch(e => {
+            this.send('wallet_data', { type: 'wallet_data', status: 'error', code: 500, message: String(e?.message || e) })
+          })
         }
       }
     } finally {
