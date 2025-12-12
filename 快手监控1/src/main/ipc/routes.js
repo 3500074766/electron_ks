@@ -5,97 +5,93 @@ import { RoiService } from '../services/roiService.js'
 import { CountdownService } from '../services/countdownService.js'
 
 export function registerIPC(mainWindow) {
-  // 通用的发送函数
-  const send = (channel, payload) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(channel, payload)
-    }
-  }
-
-  // 服务实例化
+  const send = (channel, payload) => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.webContents.send(channel, payload) } }
   const usersSvc = new UserService()
   const ksSvc = new KuaishouService()
   const roiSvc = new RoiService()
-  // CountdownService 负责定时任务，并主动推送 'countdown_tick' 和 数据事件
   const cdSvc = new CountdownService({ usersSvc, ksSvc, roiSvc, send })
 
-  // 页面加载完成后启动倒计时服务
   mainWindow.webContents.on('did-finish-load', () => {
+    send('connection_established', { type: 'connection_established', status: 'success' })
     cdSvc.start()
   })
 
-  // --- IPC Handlers (请求/响应模式) ---
-
-  // 1. 获取快手数据
   ipcMain.handle('get_all_kuaishou_data', async () => {
     try {
       const users = await usersSvc.getAllUsers()
       const ks = await ksSvc.getAllKuaishouData(users)
-      return { status: 'success', data: ks }
+      const data = { type: 'kuaishou_data', status: 'success', data: ks }
+      send('kuaishou_data', data)
+      return data
     } catch (e) {
-      return { status: 'error', message: e.message }
+      const err = { type: 'kuaishou_data', status: 'error', code: 500, message: String(e?.message || e) }
+      send('kuaishou_data', err)
+      return err
     }
   })
 
-  // 2. 获取 ROI 数据
   ipcMain.handle('get_all_roi_data', async () => {
     try {
       const users = await usersSvc.getAllUsers(false)
       const rois = await roiSvc.getAllRoiData(users)
-      return { status: 'success', data: rois }
+      const data = { type: 'roi_data', status: 'success', data: rois }
+      send('roi_data', data)
+      return data
     } catch (e) {
-      return { status: 'error', message: e.message }
+      const err = { type: 'roi_data', status: 'error', code: 500, message: String(e?.message || e) }
+      send('roi_data', err)
+      return err
     }
   })
 
-  // 3. 手动刷新所有数据
   ipcMain.handle('refresh_data', async () => {
-    cdSvc.resetAfterManualRefresh() // 重置倒计时
-    // 触发异步刷新，通过 send 推送结果，避免前端一直 await
-    // 也可以直接在这里 await 并返回，取决于数据量大小
-    Promise.all([
-        usersSvc.getAllUsers(false).then(d => send('users_data', { status: 'success', data: d })),
-        // 这里模拟触发逻辑，实际上 CountdownService 里的 _tick(true) 可能更好
-        cdSvc._tick(true)
-    ])
-    return { status: 'success' }
+    try {
+      cdSvc.resetAfterManualRefresh()
+      const users = await usersSvc.getAllUsers(false)
+      send('users_data', { type: 'users_data', status: 'success', data: users })
+      const ks = await ksSvc.getAllKuaishouData(users)
+      send('kuaishou_data', { type: 'kuaishou_data', status: 'success', data: ks })
+      const rois = await roiSvc.getAllRoiData(users)
+      send('roi_data', { type: 'roi_data', status: 'success', data: rois })
+      return { type: 'refresh_data', status: 'success' }
+    } catch (e) {
+      const err = { type: 'error', status: 'error', code: 500, message: String(e?.message || e) }
+      send('error', err)
+      return err
+    }
   })
 
-  // 4. 更新刷新间隔
-  ipcMain.handle('update_interval', (_, payload) => {
+  ipcMain.handle('update_interval', async (_event, payload) => {
     const r = cdSvc.setIntervalMinutes(Number(payload?.interval || 10))
-    return { status: 'success', interval: r.interval }
+    return { type: 'interval_updated', status: 'success', interval: r.interval }
   })
 
-  // 5. 更新 ROI
-  ipcMain.handle('update_roi', async (_, payload) => {
+  ipcMain.handle('update_roi', async (_event, payload) => {
     try {
       const result = await roiSvc.updateRoi(payload, async (uid) => usersSvc.getUserByUid(uid))
-      // 更新成功后，立即触发一次 ROI 刷新
+      const res = { type: 'update_roi_result', status: 'success', message: 'ROI更新成功', data: result }
+      send('update_roi_result', res)
       await cdSvc.refreshRoiNow()
-      return { status: 'success', data: result }
+      cdSvc.resetRoi(15)
+      return res
     } catch (e) {
-      return { status: 'error', message: e.message }
+      const err = { type: 'update_roi_result', status: 'error', message: String(e?.message || e) }
+      send('update_roi_result', err)
+      return err
     }
   })
 
-  // 6. 获取倒计时状态
-  ipcMain.handle('get_countdown_state', () => {
-    return { status: 'success', data: cdSvc.getState() }
+  ipcMain.handle('get_countdown_state', async () => {
+    return { type: 'countdown_state', status: 'success', data: cdSvc.getState() }
   })
 
-  // 7. 立即刷新ROI (新增)
-  ipcMain.handle('refresh_roi_now', async () => {
-      await cdSvc.refreshRoiNow()
-      return { status: 'success' }
+  ipcMain.handle('resume_countdown', async () => {
+    const s = cdSvc.resume()
+    return { type: 'countdown_state', status: 'success', data: s }
   })
 
-  ipcMain.handle('resume_countdown', () => {
-    return { status: 'success', data: cdSvc.resume() }
-  })
-
-  ipcMain.handle('reset_roi_countdown', () => {
+  ipcMain.handle('reset_roi_countdown', async () => {
     cdSvc.resetRoi(15)
-    return { status: 'success' }
+    return { type: 'countdown_state', status: 'success', data: cdSvc.getState() }
   })
 }

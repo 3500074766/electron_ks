@@ -1,6 +1,5 @@
 import { HttpClient, httpClient } from '../utils/httpClient.js'
-// 引入新的数据库管理器
-import { appStore } from '../db/appStore.js'
+import { OverviewRepo } from '../utils/overviewRepo.js'
 
 const API_URLS = {
   OVERVIEW: 'https://niu.e.kuaishou.com/rest/esp/report/effect/overview'
@@ -8,6 +7,7 @@ const API_URLS = {
 
 export class KuaishouService {
   constructor() {
+    this.repo = new OverviewRepo()
     this.client = httpClient || new HttpClient()
   }
 
@@ -42,17 +42,12 @@ export class KuaishouService {
   async processUser(user) {
     const ck = user.ck
     if (!ck) return null
-
-    // 1. 获取 API 数据
     const result = await this._getOverview(ck)
     const dataNode = typeof result?.data === 'object' && result?.data?.data ? result.data.data : result?.data
     if (!dataNode || !Array.isArray(dataNode?.overview)) return null
     const overview = dataNode.overview
-
     let { gmv, orders, spend, globalRoi } = this._pickItems(overview)
     if (!spend) return null
-
-    // 简单重试逻辑 (保持原有逻辑)
     let retry = 0
     while (retry < 5 && spend?.value === 0) {
       const r = await this._getOverview(ck)
@@ -63,40 +58,32 @@ export class KuaishouService {
       retry++
       await new Promise(rs => setTimeout(rs, 1000))
     }
-
-    // 2. 数据处理
-    const currentSpend = Math.round((spend?.value || 0) / 1000 * 100) / 100
-    const currentGmv = Math.round((gmv?.value || 0) / 1000 * 100) / 100
-    const currentOrderCount = Math.trunc(orders?.value || 0)
-    const currentGlobalRoi = Math.round((globalRoi?.value || 0) * 100) / 100
-
-    // 3. 从新数据库获取上次花费
-    const lastSpend = await appStore.getLastSpend(user.UID)
-    const changeValue = lastSpend > 0 ? Math.round((currentSpend - lastSpend) * 100) / 100 : '--'
-
-    // 4. 构建要保存的数据对象 (这里就是 data 字段的内容)
-    const statsData = {
-      花费: currentSpend, // 保存当前值作为下次的"上次花费"
-      上次花费: lastSpend, // 用于前端展示
-      消耗: changeValue,
-      GMV: currentGmv,
-      订单数: currentOrderCount,
-      全站ROI: currentGlobalRoi,
-      时间: new Date().toLocaleTimeString(),
-      // 可以在这里加任何你想存的字段，比如:
-      // items: overview
-    }
-
-    // 5. 存入新数据库
-    await appStore.saveUserStats(user.UID, user.名称, statsData)
-
-    // 6. 返回完整数据给前端
+    const spendValue = spend?.value || 0
+    const currentSpend = Math.round((spendValue / 1000) * 100) / 100
+    const gmvValue = gmv?.value || 0
+    const currentGmv = Math.round((gmvValue / 1000) * 100) / 100
+    const orderCountValue = orders?.value || 0
+    const currentOrderCount = Math.trunc(orderCountValue)
+    const globalRoiValue = globalRoi?.value || 0
+    const currentGlobalRoi = Math.round(globalRoiValue * 100) / 100
+    const lastSpendValue = this.repo.getLastSpend(user.UID)
+    const lastSpend = Math.round((lastSpendValue / 1000) * 100) / 100
+    const changeValue = lastSpendValue > 0 ? Math.round(((spendValue / 1000 - lastSpendValue / 1000)) * 100) / 100 : '--'
+    const itemsToSave = overview.map(it => ({ name: it?.name || '', value: it?.value || 0, unit: it?.unit || '' }))
+    this.repo.save(user.UID, itemsToSave)
+    const timeStr = new Date().toLocaleTimeString()
     return {
       UID: String(user.UID),
       名称: user.名称,
       头像: user.头像,
-      ck: user.ck,
-      ...statsData
+      消耗: changeValue,
+      上次花费: lastSpend,
+      花费: currentSpend,
+      GMV: currentGmv,
+      订单数: currentOrderCount,
+      全站ROI: currentGlobalRoi,
+      时间: timeStr,
+      ck: user.ck
     }
   }
 
@@ -104,7 +91,8 @@ export class KuaishouService {
     const tasks = users.map(u => this.processUser(u))
     const results = await Promise.all(tasks)
     const filtered = results.filter(Boolean)
-    // 这里其实不需要再做复杂的合并，因为 processUser 已经返回了完整数据
-    return filtered
+    const ordered = []
+    users.forEach(user => { const item = filtered.find(d => d.UID === user.UID); if (item) ordered.push(item) })
+    return ordered
   }
 }

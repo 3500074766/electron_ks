@@ -1,15 +1,10 @@
 import { resolve } from 'path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
-import vue from '@vitejs/plugin-vue'
+import react from '@vitejs/plugin-react' // 1. 必须引入 react 插件
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
-    build: {
-      rollupOptions: {
-        external: ['sqlite3']
-      }
-    }
+    plugins: [externalizeDepsPlugin()]
   },
   preload: {
     plugins: [externalizeDepsPlugin()]
@@ -20,6 +15,7 @@ export default defineConfig({
         '@renderer': resolve('src/renderer/src')
       }
     },
-    plugins: [vue()]
+    // 2. 这里的 plugins 必须是 react()，不能是 vue()
+    plugins: [react()]
   }
 })

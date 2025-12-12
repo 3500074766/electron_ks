@@ -1,0 +1,41 @@
+/* v4 核心引入：这一行顶替了以前的三行 @tailwind 指令 */
+@import "tailwindcss";
+
+/* v4 默认会自动扫描项目文件。
+   如果发现样式不生效，可以在这里显式指定源码路径：
+   @source "../**";
+*/
+
+@theme {
+  /* v4 可以在这里直接覆盖主题，不需要 tailwind.config.js */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Microsoft YaHei", "PingFang SC", "Heiti SC", sans-serif;
+
+  /* 定义你的颜色变量（如果有自定义需求） */
+  /* --color-primary: #2563eb; */
+}
+
+/* 全局样式 */
+body {
+  /* 直接使用 theme 中定义的字体 */
+  font-family: var(--font-sans);
+
+  /* v4 的 apply 语法依然有效 */
+  @apply bg-zinc-50 text-zinc-900 antialiased;
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-zinc-300 rounded-full;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
