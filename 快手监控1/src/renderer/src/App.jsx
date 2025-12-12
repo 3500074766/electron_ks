@@ -9,7 +9,8 @@ import {
   Zap,
   AlertCircle,
   CheckCircle,
-  XCircle
+  XCircle,
+  AlertTriangle
 } from 'lucide-react'
 
 // --- UI Components ---
@@ -40,13 +41,14 @@ const Button = ({
       variant === 'solid'
         ? 'bg-blue-600 text-white hover:bg-blue-700'
         : 'bg-blue-50 text-blue-600 hover:bg-blue-100',
-    default: 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200'
+    default: 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200',
+    danger: 'bg-rose-600 text-white hover:bg-rose-700'
   }
   return (
     <button
       onClick={onClick}
       disabled={loading || disabled}
-      className={`${baseStyles} ${sizes[size]} ${colors[color]} ${className}`}
+      className={`${baseStyles} ${sizes[size]} ${colors[color] || colors.default} ${className}`}
     >
       {loading && <RefreshCw className="w-4 h-4 mr-2 animate-spin" />}
       {children}
@@ -62,22 +64,118 @@ const Input = ({
   placeholder,
   className = '',
   size = 'md',
-  onClick // Add onClick prop to handle propagation
+  onClick, // Add onClick prop to handle propagation
+  min = -Infinity,
+  max = Infinity,
+  wheelMin = -Infinity,
+  wheelMax = Infinity
 }) => {
+  const inputRef = useRef(null)
   const sizeClass = size === 'sm' ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm'
+
+  // 使用 ref 来保存最新的 props，以便在原生事件监听器中访问最新的状态
+  const latestProps = useRef({ value, onChange, placeholder, min, max, wheelMin, wheelMax })
+
+  useEffect(() => {
+    latestProps.current = { value, onChange, placeholder, min, max, wheelMin, wheelMax }
+  }, [value, onChange, placeholder, min, max, wheelMin, wheelMax])
+
+  // 处理手动输入，增加数字和范围校验
+  const handleInputChange = (e) => {
+    const val = e.target.value
+    // 允许空字符串（删除操作）
+    if (val === '') {
+      onChange(e)
+      return
+    }
+
+    // 正则校验：只允许输入正数（整数或小数）
+    if (!/^\d*\.?\d*$/.test(val)) return
+
+    const numVal = parseFloat(val)
+    if (!isNaN(numVal)) {
+      // 限制最大值 (例如 100)
+      if (numVal > max) return
+      // 限制最小值 (通常输入时不做严格最小值校验，防止无法输入 '0.5' 这种过程值，但在 blur 时可以处理，这里主要防负数)
+      if (numVal < 0) return
+    }
+
+    onChange(e)
+  }
+
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+
+    const handleWheelNative = (e) => {
+      // 只有当输入框处于聚焦状态时才响应滚轮事件
+      if (document.activeElement === el) {
+        // 关键：使用 { passive: false } 并在原生事件中 preventDefault
+        e.preventDefault()
+
+        const {
+          value: currValue,
+          onChange: currOnChange,
+          placeholder: currPlaceholder,
+          wheelMin,
+          wheelMax
+        } = latestProps.current
+
+        // deltaY < 0 为向上滚动（+1），deltaY > 0 为向下滚动（-1）
+        const delta = e.deltaY < 0 ? 1 : -1
+
+        let baseValue = currValue
+        // 如果输入框没有数据，使用 placeholder 作为基准
+        if (baseValue === '' || baseValue === null || baseValue === undefined) {
+          baseValue = currPlaceholder
+        }
+
+        let numVal = parseFloat(baseValue)
+        // 如果基准值不是有效数字，则不处理
+        if (isNaN(numVal)) return
+
+        // 计算新值，保留两位小数
+        let newValue = Math.round((numVal + delta) * 100) / 100
+
+        // 滚动时的特殊范围限制
+        // 这里的逻辑已修改：如果新值超出边界，直接 return 不更新（表现为滚不动），而不再强制设为边界值
+        if (wheelMin !== -Infinity && newValue < wheelMin) {
+          return
+        }
+        if (wheelMax !== -Infinity && newValue > wheelMax) {
+          return
+        }
+
+        // 触发 onChange，模拟 event 对象结构
+        if (currOnChange) {
+          currOnChange({ target: { value: String(newValue) } })
+        }
+      }
+    }
+
+    // 添加原生监听器，显式指定 passive: false
+    el.addEventListener('wheel', handleWheelNative, { passive: false })
+
+    return () => {
+      el.removeEventListener('wheel', handleWheelNative)
+    }
+  }, [])
+
   return (
     <div
       className={`flex items-center bg-white rounded-lg border border-zinc-300 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 transition-all ${sizeClass} ${className}`}
       onClick={onClick}
     >
       <input
+        ref={inputRef}
         type="text"
         value={value}
-        onChange={onChange}
+        onChange={handleInputChange}
         onBlur={onBlur}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
-        className="w-full bg-transparent outline-none text-zinc-900 placeholder-zinc-400"
+        // 添加 select-text 确保输入框内容始终可选，不受父级 select-none 影响
+        className="w-full bg-transparent outline-none text-zinc-900 placeholder-zinc-400 select-text"
       />
     </div>
   )
@@ -94,36 +192,61 @@ const Badge = ({ children, color = 'default' }) => {
   )
 }
 
+// 确认弹窗组件
+const ConfirmModal = ({ isOpen, title, content, onConfirm, onCancel }) => {
+  if (!isOpen) return null
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-[2px] transition-all animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl shadow-2xl w-96 p-6 transform transition-all scale-100 border border-zinc-100">
+        <div className="flex items-center gap-3 mb-4 text-amber-600">
+          <AlertTriangle size={28} />
+          <h3 className="text-xl font-bold text-zinc-800">{title}</h3>
+        </div>
+        <p className="text-zinc-600 mb-8 leading-relaxed text-base">{content}</p>
+        <div className="flex justify-end gap-3">
+          <Button
+            variant="outline"
+            color="default"
+            onClick={onCancel}
+            className="!bg-white border border-zinc-200 !text-zinc-700 hover:!bg-zinc-50"
+          >
+            取消
+          </Button>
+          <Button
+            onClick={onConfirm}
+            color="primary"
+            className="!bg-blue-600 hover:!bg-blue-700 !text-white shadow-lg shadow-blue-200"
+          >
+            确认修改
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // 优化后的顶部消息提示组件
-// 1. 显示时间缩短为 1秒 (1000ms)
-// 2. 增加进场和退场动画
 const Toast = ({ message, type, onClose }) => {
   const [isVisible, setIsVisible] = useState(false)
   const [shouldRender, setShouldRender] = useState(false)
 
-  // 监听 message 变化来控制显示
   useEffect(() => {
     if (message) {
       setShouldRender(true)
-      // 稍微延迟一点点让 DOM 先渲染，触发 transition 动画
       requestAnimationFrame(() => setIsVisible(true))
-
-      // 1秒后开始退场
       const timer = setTimeout(() => {
         setIsVisible(false)
       }, 1500)
-
       return () => clearTimeout(timer)
     }
   }, [message])
 
-  // 监听可见性变化，处理退场后的卸载
   useEffect(() => {
     if (!isVisible && shouldRender) {
       const timer = setTimeout(() => {
         setShouldRender(false)
-        onClose() // 通知父组件清空状态
-      }, 300) // 等待 300ms 动画结束
+        onClose()
+      }, 300)
       return () => clearTimeout(timer)
     }
   }, [isVisible, shouldRender, onClose])
@@ -133,13 +256,15 @@ const Toast = ({ message, type, onClose }) => {
   const styles =
     type === 'success'
       ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-      : 'bg-rose-50 text-rose-700 border-rose-200'
-  const Icon = type === 'success' ? CheckCircle : XCircle
+      : type === 'warning'
+        ? 'bg-amber-50 text-amber-700 border-amber-200'
+        : 'bg-rose-50 text-rose-700 border-rose-200'
+  const Icon = type === 'success' ? CheckCircle : type === 'warning' ? AlertTriangle : XCircle
 
   return (
     <div
       onClick={() => setIsVisible(false)}
-      className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 px-4 py-3 rounded-xl border shadow-lg flex items-center gap-3 ${styles}
+      className={`fixed top-6 left-1/2 -translate-x-1/2 z-[70] px-4 py-3 rounded-xl border shadow-lg flex items-center gap-3 ${styles}
         transition-all duration-300 ease-in-out cursor-pointer hover:opacity-80
         ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}
       `}
@@ -160,7 +285,7 @@ const COLUMNS = [
   { label: '余额', key: '余额', width: '', align: 'center' },
   { label: '全站ROI', key: '全站ROI', width: '', align: 'center' },
   { label: '投放ROI', key: 'roi', width: '', align: 'center' },
-  { label: '操作', key: null, width: '', align: 'center' }
+  { label: '操作', key: null, width: 'w-38', align: 'center' }
 ]
 
 // --- Main Logic ---
@@ -168,6 +293,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('monitor')
   const [loading, setLoading] = useState(false)
   const [notification, setNotification] = useState({ message: '', type: '' })
+
+  // Modal State
+  const [confirmModal, setConfirmModal] = useState({ isOpen: false, data: null })
 
   // Settings
   const [minCost, setMinCost] = useState(0.5)
@@ -178,7 +306,7 @@ export default function App() {
   // Data
   const [tableData, setTableData] = useState([])
   const [lastUpdateTime, setLastUpdateTime] = useState(null)
-  const [selectedUid, setSelectedUid] = useState(null) // 新增：选中行的UID
+  const [selectedUid, setSelectedUid] = useState(null)
 
   // 统一的倒计时状态
   const [countdown, setCountdown] = useState(600)
@@ -186,8 +314,6 @@ export default function App() {
   const [sortConfig, setSortConfig] = useState({ key: null, direction: null })
   const dataMapRef = useRef(new Map())
 
-  // 用来标记是否是手动刷新
-  // 双重保险：不仅依赖后端返回的 trigger，前端自己也记一个 flag
   const isManualRefresh = useRef(false)
   const isEditingInterval = useRef(false)
 
@@ -211,7 +337,6 @@ export default function App() {
   const mergeData = (newData, shouldUpdateTime = true) => {
     if (!Array.isArray(newData)) return
 
-    // 只有当 shouldUpdateTime 为 true 时（即非手动刷新），才更新时间
     if (shouldUpdateTime) {
       const now = new Date().toLocaleTimeString()
       setLastUpdateTime(now)
@@ -265,7 +390,7 @@ export default function App() {
   const refreshAll = async () => {
     if (loading) return
     setLoading(true)
-    isManualRefresh.current = true // 标记开始手动刷新
+    isManualRefresh.current = true
 
     try {
       const res = await callApi('refreshData')
@@ -279,12 +404,6 @@ export default function App() {
       showNotify('请求超时或网络异常', 'error')
     } finally {
       setLoading(false)
-      // 注意：这里不要立即设为 false，因为 IPC 事件是异步到达的。
-      // 我们在 IPC 监听器里处理完数据后，或者依靠后端返回的 trigger 来判断。
-      // 为了安全起见，这里设为 false，但在监听器里我们优先检查 trigger 字段。
-      // 如果后端没返回 trigger，isManualRefresh.current 可以在这里短暂保持 true 直到 UI 渲染周期结束，
-      // 但最稳妥的是后端一定要回传 trigger: 'manual'。
-      // 前端这里设为 false 是为了重置状态，防止后续自动刷新被误判。
       setTimeout(() => {
         isManualRefresh.current = false
       }, 500)
@@ -308,8 +427,6 @@ export default function App() {
     if (val === refreshInterval) return
 
     setRefreshInterval(val)
-
-    // 直接传数值
     await callApi('updateInterval', val)
 
     const state = await callApi('getCountdownState')
@@ -326,11 +443,8 @@ export default function App() {
     }
   }
 
-  const submitRoi = async (row, e) => {
-    // 阻止冒泡，避免触发行的点击选中事件
-    e && e.stopPropagation()
-    const newRoi = parseFloat(row.editRoi)
-    if (!newRoi) return showNotify('请输入有效数字', 'error')
+  // 执行 ROI 更新的实际逻辑
+  const executeRoiUpdate = async (row, newRoi) => {
     setLoading(true)
     const res = await callApi('updateRoi', {
       uid: row.UID,
@@ -340,22 +454,60 @@ export default function App() {
     setLoading(false)
     if (res && res.status === 'success') {
       showNotify('ROI 更新成功', 'success')
-      handleEditRoiChange(row.UID, '')
+      handleEditRoiChange(row.UID, '') // 清空输入框
+      // 修改成功后，自动触发刷新逻辑（效果等同于点击“刷新ROI和余额”按钮）
+      refreshAll()
     } else {
       showNotify(res?.message || '更新失败', 'error')
     }
   }
 
+  // 提交逻辑，包含阈值检查
+  const submitRoi = async (row, e) => {
+    e && e.stopPropagation()
+    const newRoi = parseFloat(row.editRoi)
+
+    if (isNaN(newRoi)) return showNotify('请输入有效数字', 'error')
+    if (newRoi < 0) return showNotify('ROI 不能小于 0', 'error')
+    if (newRoi > 100) return showNotify('ROI 不能大于 100', 'error')
+
+    // 获取当前投放ROI
+    const currentRoi = parseFloat(row.roi) || 0
+
+    // 检查差值是否超过 20 (这里用差值 > 20，即新值比旧值大20，或者根据语义理解为偏离超过20)
+    // 根据描述："如果要改的值比投放ROI超过20"，通常指增加值过大。为安全起见，我们检测正向增加。
+    // 如果是双向检测 (newRoi - currentRoi > 20)
+    const diff = newRoi - currentRoi
+
+    if (diff > 20) {
+      // 弹出确认框
+      setConfirmModal({
+        isOpen: true,
+        data: { row, newRoi, currentRoi }
+      })
+      return
+    }
+
+    // 正常更新
+    await executeRoiUpdate(row, newRoi)
+  }
+
+  const handleConfirmUpdate = async () => {
+    const { row, newRoi } = confirmModal.data
+    setConfirmModal({ isOpen: false, data: null })
+    await executeRoiUpdate(row, newRoi)
+  }
+
+  const handleCancelUpdate = () => {
+    setConfirmModal({ isOpen: false, data: null })
+    showNotify('已取消修改', 'warning')
+  }
+
   useEffect(() => {
     if (!window.api) return
 
-    // 封装一个通用的数据处理函数，增加双重保险
     const handleDataUpdate = (res) => {
       if (res.status === 'success') {
-        // 核心逻辑：
-        // 1. 如果后端明确标记为 manual (res.trigger === 'manual')，则它是手动刷新 -> 不更新时间
-        // 2. 如果前端 ref 标记为 manual (isManualRefresh.current)，也是手动刷新 -> 不更新时间
-        // 只有两者都不是手动，才更新时间 (true)
         const isManual = res.trigger === 'manual' || isManualRefresh.current
         mergeData(res.data, !isManual)
       }
@@ -367,8 +519,6 @@ export default function App() {
       window.api.on('wallet_data', handleDataUpdate),
 
       window.api.on('users_data', (res) => {
-        // 修复：users_data 也需要判断 isManualRefresh.current
-        // 如果是手动刷新期间，传入 false 不更新时间；否则（冷启动等）传入 true 更新时间
         if (res.status === 'success') {
           mergeData(res.data, !isManualRefresh.current)
         }
@@ -438,6 +588,19 @@ export default function App() {
         message={notification.message}
         type={notification.type}
         onClose={() => setNotification({ message: '', type: '' })}
+      />
+
+      {/* Confirmation Modal */}
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title="确认大幅修改 ROI？"
+        content={
+          confirmModal.data
+            ? `您正在将用户【${confirmModal.data.row.名称}】的 ROI 从 ${confirmModal.data.currentRoi} 修改为 ${confirmModal.data.newRoi}。增加幅度超过 20，是否确认？`
+            : ''
+        }
+        onConfirm={handleConfirmUpdate}
+        onCancel={handleCancelUpdate}
       />
 
       <div className="w-64 bg-white border-r border-zinc-100 flex flex-col z-10 shadow-sm">
@@ -531,11 +694,12 @@ export default function App() {
               <div className="overflow-auto flex-1">
                 <table className="w-full text-left border-collapse table-fixed">
                   <thead className="bg-zinc-50/95 sticky top-0 z-10 backdrop-blur-sm border-b border-zinc-200">
-                    <tr>
+                    {/* 添加 select-none 禁止表头文字选择 */}
+                    <tr className="select-none">
                       {COLUMNS.map((col, i) => (
                         <th
                           key={i}
-                          className={`${i === 0 ? 'pl-8 pr-3' : 'px-3'} py-3 text-base font-bold text-zinc-600 uppercase tracking-wide whitespace-nowrap ${col.width} ${col.key ? 'cursor-pointer hover:text-blue-600 select-none transition-colors' : ''} ${col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'}`}
+                          className={`${i === 0 ? 'pl-8 pr-3' : 'px-3'} py-3 text-base font-bold text-zinc-600 uppercase tracking-wide whitespace-nowrap ${col.width} ${col.key ? 'cursor-pointer hover:text-blue-600 transition-colors' : ''} ${col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'}`}
                           onClick={() => col.key && handleSort(col.key)}
                         >
                           <div
@@ -574,8 +738,9 @@ export default function App() {
                         <tr
                           key={row.UID}
                           onClick={() => setSelectedUid(row.UID)}
+                          // 添加 select-none 禁止表格内容文字选择
                           className={`
-                            transition-all duration-200 cursor-pointer group border-b border-zinc-50 last:border-0
+                            transition-all duration-200 cursor-pointer group border-b border-zinc-50 last:border-0 select-none
                             ${isSelected ? 'bg-blue-100/60 hover:bg-blue-100' : 'hover:bg-blue-50'}
                           `}
                         >
@@ -639,7 +804,12 @@ export default function App() {
                                 placeholder={row.roi}
                                 value={row.editRoi || ''}
                                 onChange={(e) => handleEditRoiChange(row.UID, e.target.value)}
-                                // Removed onClick={(e) => e.stopPropagation()} to allow row selection
+                                // 限制手动输入：0 - 100
+                                min={0}
+                                max={100}
+                                // 限制滚轮：2 - 99
+                                wheelMin={1}
+                                wheelMax={100}
                               />
                               <Button
                                 size="sm"
