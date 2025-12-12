@@ -61,12 +61,14 @@ const Input = ({
   onKeyDown,
   placeholder,
   className = '',
-  size = 'md'
+  size = 'md',
+  onClick // Add onClick prop to handle propagation
 }) => {
   const sizeClass = size === 'sm' ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm'
   return (
     <div
       className={`flex items-center bg-white rounded-lg border border-zinc-300 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 transition-all ${sizeClass} ${className}`}
+      onClick={onClick}
     >
       <input
         type="text"
@@ -176,6 +178,7 @@ export default function App() {
   // Data
   const [tableData, setTableData] = useState([])
   const [lastUpdateTime, setLastUpdateTime] = useState(null)
+  const [selectedUid, setSelectedUid] = useState(null) // 新增：选中行的UID
 
   // 统一的倒计时状态
   const [countdown, setCountdown] = useState(600)
@@ -323,7 +326,9 @@ export default function App() {
     }
   }
 
-  const submitRoi = async (row) => {
+  const submitRoi = async (row, e) => {
+    // 阻止冒泡，避免触发行的点击选中事件
+    e && e.stopPropagation()
     const newRoi = parseFloat(row.editRoi)
     if (!newRoi) return showNotify('请输入有效数字', 'error')
     setLoading(true)
@@ -556,6 +561,7 @@ export default function App() {
                       const costVal = parseFloat(row.消耗)
                       const balanceVal = parseFloat(row.余额)
                       const isLowBalance = !isNaN(balanceVal) && balanceVal < 10
+                      const isSelected = selectedUid === row.UID
 
                       let badge = !isNaN(costVal)
                         ? costVal < parseFloat(minCost)
@@ -565,7 +571,14 @@ export default function App() {
                             : 'default'
                         : 'default'
                       return (
-                        <tr key={row.UID} className="hover:bg-blue-50/40 transition-colors group">
+                        <tr
+                          key={row.UID}
+                          onClick={() => setSelectedUid(row.UID)}
+                          className={`
+                            transition-all duration-200 cursor-pointer group border-b border-zinc-50 last:border-0
+                            ${isSelected ? 'bg-blue-100/60 hover:bg-blue-100' : 'hover:bg-blue-50'}
+                          `}
+                        >
                           <td className="pl-8 pr-3 py-2.5 text-left w-56">
                             <div className="flex items-center gap-2">
                               <div className="w-8 h-8 rounded-lg bg-zinc-100 overflow-hidden border border-zinc-200 shrink-0 shadow-sm group-hover:shadow-md transition-all">
@@ -622,15 +635,16 @@ export default function App() {
                             <div className="flex items-center justify-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
                               <Input
                                 size="sm"
-                                className="w-20 text-center font-mono bg-white shadow-sm"
+                                className="w-24 text-center font-mono !text-base bg-white shadow-sm"
                                 placeholder={row.roi}
                                 value={row.editRoi || ''}
                                 onChange={(e) => handleEditRoiChange(row.UID, e.target.value)}
+                                // Removed onClick={(e) => e.stopPropagation()} to allow row selection
                               />
                               <Button
                                 size="sm"
-                                className="!px-3 shadow-sm"
-                                onClick={() => submitRoi(row)}
+                                className="!px-3 !text-base shadow-sm"
+                                onClick={(e) => submitRoi(row, e)}
                               >
                                 改
                               </Button>
