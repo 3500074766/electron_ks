@@ -3,195 +3,227 @@ import fs from 'fs'
 import { join } from 'path'
 
 export class CountdownService {
-  constructor({ usersSvc, ksSvc, roiSvc, walletSvc, send }) { // 注入 walletSvc
+  constructor({ usersSvc, ksSvc, roiSvc, walletSvc, send }) {
     this.usersSvc = usersSvc
     this.ksSvc = ksSvc
     this.roiSvc = roiSvc
-    this.walletSvc = walletSvc // 保存引用
+    this.walletSvc = walletSvc
     this.send = send
+
+    // 默认 10 分钟
     this.refreshIntervalMinutes = 10
-    this.nextKuaishouAt = Date.now() + this.refreshIntervalMinutes * 60 * 1000
-    this.nextRoiAt = Date.now() + 15 * 1000
-    this.lockRoi = false
-    this.lockKs = false
+    // 初始目标时间（稍后在 _normalize 中会被重置）
+    this.nextRefreshAt = 0
+
+    this.isUpdating = false
     this.timer = null
     this.configPath = join(app.getPath('userData'), 'countdown.json')
     this.coldStartDone = false
+
     this._load()
     this._normalize()
   }
+
+  // 加载配置
   _load() {
     try {
       if (fs.existsSync(this.configPath)) {
         const d = JSON.parse(fs.readFileSync(this.configPath, 'utf-8'))
-        this.refreshIntervalMinutes = d.refreshIntervalMinutes ?? this.refreshIntervalMinutes
-        this.nextKuaishouAt = d.nextKuaishouAt ?? this.nextKuaishouAt
-        this.nextRoiAt = d.nextRoiAt ?? this.nextRoiAt
-        this.coldStartDone = !!d.coldStartDone
+
+        // 1. 只加载间隔配置
+        let savedInterval = Number(d.refreshIntervalMinutes)
+        if (isNaN(savedInterval) || savedInterval < 1) savedInterval = 10
+        this.refreshIntervalMinutes = savedInterval
+
+        // 2. 核心修改：强制重置时间，不读取存档的 nextRefreshAt
+        // 这解决了 "启动时显示 3:22" 的问题，确保每次启动都是满额倒计时
+        this.nextRefreshAt = 0
+
+        // 3. 强制重置冷启动状态，确保启动时立即拉取一次数据
+        this.coldStartDone = false
       }
     } catch { }
   }
+
+  // 保存配置 (虽然我们保存了 nextRefreshAt，但在 _load 里我们选择忽略它，以保证启动重置)
   _save() {
     try {
-      fs.writeFileSync(this.configPath, JSON.stringify({ refreshIntervalMinutes: this.refreshIntervalMinutes, nextKuaishouAt: this.nextKuaishouAt, nextRoiAt: this.nextRoiAt, coldStartDone: this.coldStartDone }), 'utf-8')
+      fs.writeFileSync(this.configPath, JSON.stringify({
+        refreshIntervalMinutes: this.refreshIntervalMinutes,
+        nextRefreshAt: this.nextRefreshAt,
+        coldStartDone: this.coldStartDone
+      }), 'utf-8')
     } catch { }
   }
+
+  // 规范化时间：如果时间无效或已过期，重置为【当前时间 + 间隔】
   _normalize() {
     const now = Date.now()
-    const roiPeriod = 15 * 1000
-    const ksPeriod = this.refreshIntervalMinutes * 60 * 1000
-    if (this.nextRoiAt <= now) {
-      const delta = now - this.nextRoiAt
-      const rem = roiPeriod - (delta % roiPeriod)
-      this.nextRoiAt = now + rem
-    }
-    if (this.nextKuaishouAt <= now) {
-      const delta = now - this.nextKuaishouAt
-      const rem = ksPeriod - (delta % ksPeriod)
-      this.nextKuaishouAt = now + rem
+    const safeMins = Math.max(1, this.refreshIntervalMinutes || 10)
+
+    // 启动时 this.nextRefreshAt 被 _load 设为 0，这里一定会触发重置
+    if (!this.nextRefreshAt || isNaN(this.nextRefreshAt) || this.nextRefreshAt <= now) {
+      this.refreshIntervalMinutes = safeMins
+      this.nextRefreshAt = now + safeMins * 60 * 1000
     }
     this._save()
   }
+
   start() {
     if (this.timer) clearInterval(this.timer)
-    const now = Date.now()
-    this.nextKuaishouAt = now + this.refreshIntervalMinutes * 60 * 1000
-    this.nextRoiAt = now + 15 * 1000
-    this.coldStartDone = false
-    this._save()
+
+    // 再次校验并重置时间
+    this._normalize()
+
+    // 立即广播一次状态，让前端显示出来
+    this._broadcastTick()
+
+    // 开启每秒心跳，即使最小化也会继续运行（Electron主进程特性）
     this.timer = setInterval(() => this._tick(), 1000)
+
+    // 冷启动：立即拉取所有数据
     this._coldStartFetch()
   }
+
+  // 设置间隔
   setIntervalMinutes(mins) {
-    this.refreshIntervalMinutes = mins
-    this.nextKuaishouAt = Date.now() + mins * 60 * 1000
+    let safeMins = Number(mins)
+    // 强制修正非法值
+    if (isNaN(safeMins) || safeMins < 1) safeMins = 10
+
+    this.refreshIntervalMinutes = safeMins
+
+    // 修改间隔后，立即重置倒计时（从现在开始 + 新间隔）
+    this.nextRefreshAt = Date.now() + safeMins * 60 * 1000
+
     this._save()
-    return { interval: mins }
+
+    // 立即广播新状态
+    this._broadcastTick()
+
+    return { interval: safeMins }
   }
-  resetRoiCountdown(minutes = 2) {
-    const ms = Math.max(0, Number(minutes)) * 60 * 1000
-    this.nextRoiAt = Date.now() + ms
-    this._save()
-    return { roiNextInMs: ms }
-  }
-  async refreshRoiNow() {
-    if (this.lockRoi) return { status: 'busy' }
-    this.lockRoi = true
-    try {
-      const users = await this.usersSvc.getAllUsers(false)
-      const rois = await this.roiSvc.getAllRoiData(users)
-      this.send('roi_data', { type: 'roi_data', status: 'success', data: rois })
-      return { status: 'ok' }
-    } catch (e) {
-      this.send('roi_data', { type: 'roi_data', status: 'error', code: 500, message: String(e?.message || e) })
-      return { status: 'error' }
-    } finally {
-      this.lockRoi = false
-      this._save()
-    }
-  }
-  resetRoi(seconds = 15) {
-    const now = Date.now()
-    this.nextRoiAt = now + seconds * 1000
-    this._save()
-    const remaining = {
-      kuaishou: Math.max(0, Math.floor((this.nextKuaishouAt - now) / 1000)),
-      roi: Math.max(0, Math.floor((this.nextRoiAt - now) / 1000))
-    }
-    this.send('countdown_tick', { type: 'countdown_tick', remaining, intervalMinutes: this.refreshIntervalMinutes, triggered: [] })
-  }
-  resetAfterManualRefresh() {
-    const now = Date.now()
-    this.nextKuaishouAt = now + this.refreshIntervalMinutes * 60 * 1000
-    this.nextRoiAt = now + 15 * 1000
-    this._save()
-    const remaining = {
-      kuaishou: Math.max(0, Math.floor((this.nextKuaishouAt - now) / 1000)),
-      roi: Math.max(0, Math.floor((this.nextRoiAt - now) / 1000))
-    }
-    this.send('countdown_tick', { type: 'countdown_tick', remaining, intervalMinutes: this.refreshIntervalMinutes, triggered: [] })
-  }
+
   resume() {
     this._normalize()
-    const s = this.getState()
-    return s
+    return this.getState()
   }
+
+  // 冷启动数据拉取
   async _coldStartFetch() {
     if (this.coldStartDone) return
     try {
-      const users = await this.usersSvc.getAllUsers(false)
-      this.send('users_data', { type: 'users_data', status: 'success', data: users })
-      if (Array.isArray(users) && users.length > 0) {
-        // 使用 Promise.allSettled 或简单的 try-catch 块来并行执行，互不影响
+      const fetchPromise = (async () => {
+          const users = await this.usersSvc.getAllUsers(false)
+          this.send('users_data', { type: 'users_data', status: 'success', data: users })
 
-        // 1. 获取概览数据
-        this.ksSvc.getAllKuaishouData(users).then(ks => {
-          this.send('kuaishou_data', { type: 'kuaishou_data', status: 'success', data: ks })
-        }).catch(e => {
-          this.send('kuaishou_data', { type: 'kuaishou_data', status: 'error', code: 500, message: String(e?.message || e) })
-        })
+          if (Array.isArray(users) && users.length > 0) {
+            const p1 = this.ksSvc.getAllKuaishouData(users).then(ks =>
+              this.send('kuaishou_data', { type: 'kuaishou_data', status: 'success', data: ks, trigger: 'auto' })
+            ).catch(e =>
+              this.send('kuaishou_data', { type: 'kuaishou_data', status: 'error', code: 500, message: String(e?.message || e) })
+            )
 
-        // 2. 获取 ROI 数据
-        this.roiSvc.getAllRoiData(users).then(rois => {
-          this.send('roi_data', { type: 'roi_data', status: 'success', data: rois })
-        }).catch(e => {
-          this.send('roi_data', { type: 'roi_data', status: 'error', code: 500, message: String(e?.message || e) })
-        })
+            const p2 = this.roiSvc.getAllRoiData(users).then(rois =>
+              this.send('roi_data', { type: 'roi_data', status: 'success', data: rois, trigger: 'auto' })
+            ).catch(e =>
+              this.send('roi_data', { type: 'roi_data', status: 'error', code: 500, message: String(e?.message || e) })
+            )
 
-        // 3. 获取余额数据 (新增)
-        if (this.walletSvc) {
-          this.walletSvc.getAllWalletData(users).then(wallets => {
-            this.send('wallet_data', { type: 'wallet_data', status: 'success', data: wallets })
-          }).catch(e => {
-            this.send('wallet_data', { type: 'wallet_data', status: 'error', code: 500, message: String(e?.message || e) })
-          })
-        }
-      }
+            const p3 = this.walletSvc ? this.walletSvc.getAllWalletData(users).then(wallets =>
+              this.send('wallet_data', { type: 'wallet_data', status: 'success', data: wallets, trigger: 'auto' })
+            ).catch(e =>
+              this.send('wallet_data', { type: 'wallet_data', status: 'error', code: 500, message: String(e?.message || e) })
+            ) : Promise.resolve()
+
+            await Promise.allSettled([p1, p2, p3])
+          }
+      })()
+
+      // 60秒超时保护
+      await Promise.race([
+        fetchPromise,
+        new Promise(resolve => setTimeout(resolve, 60000))
+      ])
+
+    } catch (e) {
+      console.error("Cold start fetch failed", e)
     } finally {
       this.coldStartDone = true
       this._save()
     }
   }
+
   getState() {
     const now = Date.now()
-    const remKs = Math.max(0, Math.floor((this.nextKuaishouAt - now) / 1000))
-    const remRoi = Math.max(0, Math.floor((this.nextRoiAt - now) / 1000))
-    return { remaining: { kuaishou: remKs, roi: remRoi }, intervalMinutes: this.refreshIntervalMinutes }
+    let target = this.nextRefreshAt
+    // 容错：防止计算出 NaN
+    if (!target || isNaN(target)) {
+        target = now + (this.refreshIntervalMinutes || 10) * 60 * 1000
+    }
+    const remaining = Math.max(0, Math.floor((target - now) / 1000))
+    return { remaining, intervalMinutes: this.refreshIntervalMinutes }
   }
+
+  _broadcastTick(triggered = []) {
+    const state = this.getState()
+    this.send('countdown_tick', {
+      type: 'countdown_tick',
+      remaining: state.remaining,
+      intervalMinutes: this.refreshIntervalMinutes,
+      triggered
+    })
+  }
+
   async _tick(force = false) {
     const now = Date.now()
-    const remaining = { kuaishou: Math.max(0, Math.floor((this.nextKuaishouAt - now) / 1000)), roi: Math.max(0, Math.floor((this.nextRoiAt - now) / 1000)) }
     const triggered = []
-    if ((force || now >= this.nextRoiAt) && !this.lockRoi) {
-      this.lockRoi = true
+
+    if ((force || now >= this.nextRefreshAt) && !this.isUpdating) {
+      this.isUpdating = true
       try {
-        const users = await this.usersSvc.getAllUsers(false)
-        const rois = await this.roiSvc.getAllRoiData(users)
-        this.send('roi_data', { type: 'roi_data', status: 'success', data: rois })
+        const updateTask = async () => {
+            const users = await this.usersSvc.getAllUsers(false)
+            // 自动刷新带 trigger: 'auto' 标记，前端根据此更新时间
+            const p1 = this.ksSvc.getAllKuaishouData(users).then(ks =>
+              this.send('kuaishou_data', { type: 'kuaishou_data', status: 'success', data: ks, trigger: 'auto' })
+            ).catch(e =>
+              this.send('kuaishou_data', { type: 'kuaishou_data', status: 'error', code: 500, message: String(e?.message || e) })
+            )
+            const p2 = this.roiSvc.getAllRoiData(users).then(rois =>
+              this.send('roi_data', { type: 'roi_data', status: 'success', data: rois, trigger: 'auto' })
+            ).catch(e =>
+              this.send('roi_data', { type: 'roi_data', status: 'error', code: 500, message: String(e?.message || e) })
+            )
+            const p3 = this.walletSvc ? this.walletSvc.getAllWalletData(users).then(wallets =>
+              this.send('wallet_data', { type: 'wallet_data', status: 'success', data: wallets, trigger: 'auto' })
+            ).catch(e =>
+              this.send('wallet_data', { type: 'wallet_data', status: 'error', code: 500, message: String(e?.message || e) })
+            ) : Promise.resolve()
+
+            await Promise.allSettled([p1, p2, p3])
+        }
+
+        // 45秒超时保护
+        const timeoutTask = new Promise((_, reject) => setTimeout(() => reject(new Error('Update timeout')), 45000))
+
+        await Promise.race([updateTask(), timeoutTask])
+        triggered.push('all')
+
       } catch (e) {
-        this.send('roi_data', { type: 'roi_data', status: 'error', code: 500, message: String(e?.message || e) })
+        console.error("Auto refresh failed", e)
       } finally {
-        this.nextRoiAt = Date.now() + 15 * 1000
-        this.lockRoi = false
+        // 重置下一次刷新时间
+        this.nextRefreshAt = Date.now() + this.refreshIntervalMinutes * 60 * 1000
+        this.isUpdating = false
         this._save()
+        this._broadcastTick()
       }
-      triggered.push('roi')
+    } else {
+       this._broadcastTick()
     }
-    if ((force || now >= this.nextKuaishouAt) && !this.lockKs) {
-      this.lockKs = true
-      try {
-        const users = await this.usersSvc.getAllUsers(false)
-        const ks = await this.ksSvc.getAllKuaishouData(users)
-        this.send('kuaishou_data', { type: 'kuaishou_data', status: 'success', data: ks })
-      } catch (e) {
-        this.send('kuaishou_data', { type: 'kuaishou_data', status: 'error', code: 500, message: String(e?.message || e) })
-      } finally {
-        this.nextKuaishouAt = Date.now() + this.refreshIntervalMinutes * 60 * 1000
-        this.lockKs = false
-        this._save()
-      }
-      triggered.push('kuaishou')
-    }
-    this.send('countdown_tick', { type: 'countdown_tick', remaining, intervalMinutes: this.refreshIntervalMinutes, triggered })
   }
+
+  async refreshRoiNow() { return { status: 'ok' } }
+  resetRoi(seconds) { }
 }

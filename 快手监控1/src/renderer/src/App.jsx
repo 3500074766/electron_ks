@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
-import { Activity, TrendingUp, RefreshCw, Clock, Search, Settings, Zap, AlertCircle } from 'lucide-react'
+import {
+  Activity,
+  TrendingUp,
+  RefreshCw,
+  Clock,
+  Search,
+  Settings,
+  Zap,
+  AlertCircle,
+  CheckCircle,
+  XCircle
+} from 'lucide-react'
 
 // --- UI Components ---
 const Card = ({ children, className = '' }) => (
@@ -43,7 +54,15 @@ const Button = ({
   )
 }
 
-const Input = ({ value, onChange, placeholder, className = '', size = 'md' }) => {
+const Input = ({
+  value,
+  onChange,
+  onBlur,
+  onKeyDown,
+  placeholder,
+  className = '',
+  size = 'md'
+}) => {
   const sizeClass = size === 'sm' ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm'
   return (
     <div
@@ -53,6 +72,8 @@ const Input = ({ value, onChange, placeholder, className = '', size = 'md' }) =>
         type="text"
         value={value}
         onChange={onChange}
+        onBlur={onBlur}
+        onKeyDown={onKeyDown}
         placeholder={placeholder}
         className="w-full bg-transparent outline-none text-zinc-900 placeholder-zinc-400"
       />
@@ -71,12 +92,65 @@ const Badge = ({ children, color = 'default' }) => {
   )
 }
 
+// 优化后的顶部消息提示组件
+// 1. 显示时间缩短为 1秒 (1000ms)
+// 2. 增加进场和退场动画
+const Toast = ({ message, type, onClose }) => {
+  const [isVisible, setIsVisible] = useState(false)
+  const [shouldRender, setShouldRender] = useState(false)
+
+  // 监听 message 变化来控制显示
+  useEffect(() => {
+    if (message) {
+      setShouldRender(true)
+      // 稍微延迟一点点让 DOM 先渲染，触发 transition 动画
+      requestAnimationFrame(() => setIsVisible(true))
+
+      // 1秒后开始退场
+      const timer = setTimeout(() => {
+        setIsVisible(false)
+      }, 1500)
+
+      return () => clearTimeout(timer)
+    }
+  }, [message])
+
+  // 监听可见性变化，处理退场后的卸载
+  useEffect(() => {
+    if (!isVisible && shouldRender) {
+      const timer = setTimeout(() => {
+        setShouldRender(false)
+        onClose() // 通知父组件清空状态
+      }, 300) // 等待 300ms 动画结束
+      return () => clearTimeout(timer)
+    }
+  }, [isVisible, shouldRender, onClose])
+
+  if (!shouldRender && !message) return null
+
+  const styles =
+    type === 'success'
+      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+      : 'bg-rose-50 text-rose-700 border-rose-200'
+  const Icon = type === 'success' ? CheckCircle : XCircle
+
+  return (
+    <div
+      onClick={() => setIsVisible(false)}
+      className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 px-4 py-3 rounded-xl border shadow-lg flex items-center gap-3 ${styles}
+        transition-all duration-300 ease-in-out cursor-pointer hover:opacity-80
+        ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}
+      `}
+    >
+      <Icon size={20} />
+      <span className="font-medium text-sm">{message}</span>
+    </div>
+  )
+}
+
 // --- Column Definitions ---
-// 优化策略：
-// 1. 用户列：保持 w-64 固定宽度
-// 2. 其他列：width 设为空字符串，配合 table-fixed 会自动平摊剩余空间
 const COLUMNS = [
-  { label: '用户', key: null, width: 'w-50', align: 'left' },
+  { label: '用户', key: null, width: 'w-56', align: 'left' },
   { label: 'GMV', key: 'GMV', width: '', align: 'center' },
   { label: '上次', key: '上次花费', width: '', align: 'center' },
   { label: '花费', key: '花费', width: '', align: 'center' },
@@ -91,37 +165,60 @@ const COLUMNS = [
 export default function App() {
   const [activeTab, setActiveTab] = useState('monitor')
   const [loading, setLoading] = useState(false)
+  const [notification, setNotification] = useState({ message: '', type: '' })
 
   // Settings
   const [minCost, setMinCost] = useState(0.5)
   const [maxCost, setMaxCost] = useState(2.0)
   const [refreshInterval, setRefreshInterval] = useState(10)
+  const [tempInterval, setTempInterval] = useState('10')
 
   // Data
   const [tableData, setTableData] = useState([])
   const [lastUpdateTime, setLastUpdateTime] = useState(null)
-  const [ksCountdown, setKsCountdown] = useState(600)
-  const [roiCountdown, setRoiCountdown] = useState(15)
+
+  // 统一的倒计时状态
+  const [countdown, setCountdown] = useState(600)
+
   const [sortConfig, setSortConfig] = useState({ key: null, direction: null })
   const dataMapRef = useRef(new Map())
 
+  // 用来标记是否是手动刷新
+  // 双重保险：不仅依赖后端返回的 trigger，前端自己也记一个 flag
+  const isManualRefresh = useRef(false)
+  const isEditingInterval = useRef(false)
+
   // Helpers
-  const formatTime = (s) =>
-    `${Math.floor(s / 60)
+  const formatTime = (s) => {
+    const safeS = parseInt(s, 10)
+    if (isNaN(safeS)) return '00:00'
+    if (safeS <= 0) return '同步中...'
+    return `${Math.floor(safeS / 60)
       .toString()
-      .padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`
+      .padStart(2, '0')}:${(safeS % 60).toString().padStart(2, '0')}`
+  }
+
   const formatUrl = (u) => (u ? (u.startsWith('http') ? u : `https://${u}`) : '')
 
+  const showNotify = (msg, type = 'success') => {
+    setNotification({ message: msg, type })
+  }
+
   // Data Merging Logic
-  const mergeData = (newData) => {
+  const mergeData = (newData, shouldUpdateTime = true) => {
     if (!Array.isArray(newData)) return
-    const now = new Date().toLocaleTimeString()
-    setLastUpdateTime(now)
+
+    // 只有当 shouldUpdateTime 为 true 时（即非手动刷新），才更新时间
+    if (shouldUpdateTime) {
+      const now = new Date().toLocaleTimeString()
+      setLastUpdateTime(now)
+    }
+
     newData.forEach((item) => {
       const uid = String(item.UID || item.uid)
       if (!uid) return
       const exist = dataMapRef.current.get(uid) || {}
-      const merged = { ...exist, ...item, _updated: now }
+      const merged = { ...exist, ...item, _updated: Date.now() }
       if (exist.editRoi !== undefined) merged.editRoi = exist.editRoi
       dataMapRef.current.set(uid, merged)
     })
@@ -157,65 +254,133 @@ export default function App() {
     return sorted
   }, [tableData, sortConfig])
 
-  // API Interaction
   const callApi = async (method, payload) =>
     window.api && window.api[method]
       ? await window.api[method](payload)
       : console.warn('API missing')
 
   const refreshAll = async () => {
+    if (loading) return
     setLoading(true)
-    await callApi('refreshData')
+    isManualRefresh.current = true // 标记开始手动刷新
+
+    try {
+      const res = await callApi('refreshData')
+      if (res && res.status === 'success') {
+        showNotify('数据刷新成功', 'success')
+      } else {
+        showNotify(res?.message || '刷新失败', 'error')
+      }
+    } catch (e) {
+      console.error(e)
+      showNotify('请求超时或网络异常', 'error')
+    } finally {
+      setLoading(false)
+      // 注意：这里不要立即设为 false，因为 IPC 事件是异步到达的。
+      // 我们在 IPC 监听器里处理完数据后，或者依靠后端返回的 trigger 来判断。
+      // 为了安全起见，这里设为 false，但在监听器里我们优先检查 trigger 字段。
+      // 如果后端没返回 trigger，isManualRefresh.current 可以在这里短暂保持 true 直到 UI 渲染周期结束，
+      // 但最稳妥的是后端一定要回传 trigger: 'manual'。
+      // 前端这里设为 false 是为了重置状态，防止后续自动刷新被误判。
+      setTimeout(() => {
+        isManualRefresh.current = false
+      }, 500)
+    }
   }
-  const refreshRoiOnly = async () => {
-    setLoading(true)
-    await callApi('getAllRoiData')
+
+  const handleIntervalInputChange = (e) => {
+    setTempInterval(e.target.value)
+    isEditingInterval.current = true
   }
-  const handleUpdateInterval = (e) => {
-    const val = parseInt(e.target.value) || 10
+
+  const commitIntervalUpdate = async () => {
+    isEditingInterval.current = false
+    const val = parseInt(tempInterval)
+
+    if (isNaN(val) || val <= 0) {
+      setTempInterval(String(refreshInterval))
+      return
+    }
+
+    if (val === refreshInterval) return
+
     setRefreshInterval(val)
-    callApi('updateInterval', { interval: val })
+
+    // 直接传数值
+    await callApi('updateInterval', val)
+
+    const state = await callApi('getCountdownState')
+    if (state?.data?.remaining !== undefined && !isNaN(state.data.remaining)) {
+      setCountdown(state.data.remaining)
+    }
+
+    showNotify(`已设置刷新间隔为 ${val} 分钟`)
+  }
+
+  const handleIntervalKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.target.blur()
+    }
   }
 
   const submitRoi = async (row) => {
     const newRoi = parseFloat(row.editRoi)
-    if (!newRoi) return alert('请输入有效数字')
+    if (!newRoi) return showNotify('请输入有效数字', 'error')
     setLoading(true)
-    await callApi('updateRoi', { uid: row.UID, target_id: row.target_id, roi_ratio: newRoi })
-    handleEditRoiChange(row.UID, '')
+    const res = await callApi('updateRoi', {
+      uid: row.UID,
+      target_id: row.target_id,
+      roi_ratio: newRoi
+    })
+    setLoading(false)
+    if (res && res.status === 'success') {
+      showNotify('ROI 更新成功', 'success')
+      handleEditRoiChange(row.UID, '')
+    } else {
+      showNotify(res?.message || '更新失败', 'error')
+    }
   }
 
-  // Lifecycle
   useEffect(() => {
     if (!window.api) return
+
+    // 封装一个通用的数据处理函数，增加双重保险
+    const handleDataUpdate = (res) => {
+      if (res.status === 'success') {
+        // 核心逻辑：
+        // 1. 如果后端明确标记为 manual (res.trigger === 'manual')，则它是手动刷新 -> 不更新时间
+        // 2. 如果前端 ref 标记为 manual (isManualRefresh.current)，也是手动刷新 -> 不更新时间
+        // 只有两者都不是手动，才更新时间 (true)
+        const isManual = res.trigger === 'manual' || isManualRefresh.current
+        mergeData(res.data, !isManual)
+      }
+    }
+
     const offs = [
-      window.api.on('kuaishou_data', (res) => {
-        if (res.status === 'success') {
-          mergeData(res.data)
-          setLoading(false)
-        }
-      }),
-      window.api.on('roi_data', (res) => {
-        if (res.status === 'success') {
-          mergeData(res.data)
-          setLoading(false)
-        }
-      }),
-      window.api.on('wallet_data', (res) => {
-        if (res.status === 'success') {
-          mergeData(res.data)
-          setLoading(false)
-        }
-      }),
+      window.api.on('kuaishou_data', handleDataUpdate),
+      window.api.on('roi_data', handleDataUpdate),
+      window.api.on('wallet_data', handleDataUpdate),
+
       window.api.on('users_data', (res) => {
-        if (res.status === 'success') mergeData(res.data)
+        // 修复：users_data 也需要判断 isManualRefresh.current
+        // 如果是手动刷新期间，传入 false 不更新时间；否则（冷启动等）传入 true 更新时间
+        if (res.status === 'success') {
+          mergeData(res.data, !isManualRefresh.current)
+        }
       }),
       window.api.on('countdown_tick', (res) => {
-        if (res.remaining) {
-          setKsCountdown(res.remaining.kuaishou)
-          setRoiCountdown(res.remaining.roi)
+        if (res.remaining !== undefined && !isNaN(res.remaining)) {
+          setCountdown(res.remaining)
         }
-        if (res.intervalMinutes && res.intervalMinutes > 0) setRefreshInterval(res.intervalMinutes)
+        if (
+          !isEditingInterval.current &&
+          res.intervalMinutes &&
+          res.intervalMinutes > 0 &&
+          res.intervalMinutes !== refreshInterval
+        ) {
+          setRefreshInterval(res.intervalMinutes)
+          setTempInterval(String(res.intervalMinutes))
+        }
       }),
       window.api.on('update_roi_result', (res) => {
         setLoading(false)
@@ -224,7 +389,16 @@ export default function App() {
     ]
     ;(async () => {
       const state = await callApi('getCountdownState')
-      if (state?.data?.intervalMinutes) setRefreshInterval(state.data.intervalMinutes)
+      if (state?.data) {
+        if (state.data.intervalMinutes) {
+          setRefreshInterval(state.data.intervalMinutes)
+          setTempInterval(String(state.data.intervalMinutes))
+        }
+        if (state.data.remaining !== undefined && !isNaN(state.data.remaining)) {
+          setCountdown(state.data.remaining)
+        }
+      }
+
       callApi('getAllKuaishouData')
       callApi('getAllRoiData')
       callApi('getAllWalletData')
@@ -232,9 +406,35 @@ export default function App() {
     return () => offs.forEach((off) => off && off())
   }, [])
 
+  const renderCountdown = () => {
+    const text = formatTime(countdown)
+    const isSyncing = text === '同步中...'
+    return (
+      <div
+        className={`px-5 py-2.5 rounded-xl border shadow-sm transition-all ${isSyncing ? 'bg-amber-50 border-amber-200' : 'bg-blue-50/60 border-blue-100'}`}
+      >
+        <span
+          className={`text-[11px] block uppercase tracking-wider font-semibold mb-0.5 ${isSyncing ? 'text-amber-600' : 'text-blue-500'}`}
+        >
+          {isSyncing ? 'Status' : 'Data Sync'}
+        </span>
+        <span
+          className={`font-mono font-bold leading-none ${isSyncing ? 'text-lg text-amber-600' : 'text-2xl text-blue-600'}`}
+        >
+          {text}
+        </span>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-screen w-screen bg-zinc-50 text-zinc-900 font-sans overflow-hidden">
-      {/* Sidebar */}
+      <Toast
+        message={notification.message}
+        type={notification.type}
+        onClose={() => setNotification({ message: '', type: '' })}
+      />
+
       <div className="w-64 bg-white border-r border-zinc-100 flex flex-col z-10 shadow-sm">
         <div className="h-20 flex items-center px-6 border-b border-zinc-50 gap-3">
           <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-blue-200 shadow-md">
@@ -258,11 +458,9 @@ export default function App() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="flex-1 h-full bg-[#f8f9fa] relative overflow-hidden flex flex-col">
         {activeTab === 'monitor' ? (
           <div className="flex flex-col h-full gap-5 p-6 overflow-hidden">
-            {/* 头部卡片 */}
             <Card className="flex flex-wrap items-center justify-between p-5 gap-6 shrink-0 shadow-md">
               <div className="flex items-center gap-8">
                 <div>
@@ -273,24 +471,7 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="px-5 py-2.5 bg-zinc-50 rounded-xl border border-zinc-200/60 shadow-sm">
-                    <span className="text-[11px] text-zinc-500 block uppercase tracking-wider font-semibold mb-0.5">
-                      Data Sync
-                    </span>
-                    <span className="font-mono text-2xl font-bold text-zinc-700 leading-none">
-                      {formatTime(ksCountdown)}
-                    </span>
-                  </div>
-                  <div className="px-5 py-2.5 bg-blue-50/60 rounded-xl border border-blue-100 shadow-sm">
-                    <span className="text-[11px] text-blue-500 block uppercase tracking-wider font-semibold mb-0.5">
-                      ROI Sync
-                    </span>
-                    <span className="font-mono text-2xl font-bold text-blue-600 leading-none">
-                      {formatTime(roiCountdown)}
-                    </span>
-                  </div>
-                </div>
+                <div className="flex items-center gap-3">{renderCountdown()}</div>
               </div>
 
               <div className="flex items-center gap-5 ml-auto">
@@ -321,9 +502,11 @@ export default function App() {
                   </div>
                   <Input
                     size="md"
-                    className="w-20 text-center font-bold text-blue-600"
-                    value={refreshInterval}
-                    onChange={handleUpdateInterval}
+                    className="w-20 text-center font-bold text-blue-600 focus:ring-blue-500"
+                    value={tempInterval}
+                    onChange={handleIntervalInputChange}
+                    onBlur={commitIntervalUpdate}
+                    onKeyDown={handleIntervalKeyDown}
                   />
                 </div>
 
@@ -334,28 +517,19 @@ export default function App() {
                   loading={loading}
                   className="shadow-lg shadow-blue-200"
                 >
-                  全量刷新
-                </Button>
-                <Button onClick={refreshRoiOnly} variant="flat" disabled={loading}>
-                  仅ROI
+                  刷新ROI和余额
                 </Button>
               </div>
             </Card>
 
             <Card className="flex-1 overflow-hidden flex flex-col relative border-t-4 border-t-blue-500/20">
               <div className="overflow-auto flex-1">
-                {/* 修改关键点：
-                   1. w-full: 恢复全宽表格，填满容器，消除右侧空白
-                   2. table-fixed: 启用固定布局，配合 COLUMNS 的空宽度实现自动平摊
-                */}
                 <table className="w-full text-left border-collapse table-fixed">
                   <thead className="bg-zinc-50/95 sticky top-0 z-10 backdrop-blur-sm border-b border-zinc-200">
                     <tr>
                       {COLUMNS.map((col, i) => (
                         <th
                           key={i}
-                          // pl-8 pr-3: 保持第一列左侧的舒适间距
-                          // whitespace-nowrap: 防止表头换行
                           className={`${i === 0 ? 'pl-8 pr-3' : 'px-3'} py-3 text-base font-bold text-zinc-600 uppercase tracking-wide whitespace-nowrap ${col.width} ${col.key ? 'cursor-pointer hover:text-blue-600 select-none transition-colors' : ''} ${col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'}`}
                           onClick={() => col.key && handleSort(col.key)}
                         >
@@ -392,12 +566,7 @@ export default function App() {
                         : 'default'
                       return (
                         <tr key={row.UID} className="hover:bg-blue-50/40 transition-colors group">
-                          {/* 用户名列：
-                              1. pl-8: 保持左侧间距
-                              2. w-64 (在 COLUMNS 中定义): 保持固定宽度
-                              3. truncate: 内容过长自动省略
-                          */}
-                          <td className="pl-8 pr-3 py-2.5 text-left w-64">
+                          <td className="pl-8 pr-3 py-2.5 text-left w-56">
                             <div className="flex items-center gap-2">
                               <div className="w-8 h-8 rounded-lg bg-zinc-100 overflow-hidden border border-zinc-200 shrink-0 shadow-sm group-hover:shadow-md transition-all">
                                 {row.头像 && (
@@ -414,14 +583,11 @@ export default function App() {
                                 >
                                   {row.名称}
                                 </div>
-                                <div className="text-xs text-zinc-400 font-mono">
-                                  UID:{row.UID}
-                                </div>
+                                <div className="text-xs text-zinc-400 font-mono">UID:{row.UID}</div>
                               </div>
                             </div>
                           </td>
 
-                          {/* 其他列：whitespace-nowrap 防止换行，table-fixed 会自动处理宽度平摊 */}
                           <td className="px-3 py-2.5 font-mono text-base text-zinc-800 text-center whitespace-nowrap">
                             ¥{row.GMV}
                           </td>
@@ -436,9 +602,10 @@ export default function App() {
                             <Badge color={badge}>{row.消耗}</Badge>
                           </td>
 
-                          {/* 余额列 */}
                           <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                            <div className={`flex items-center justify-center gap-1 font-mono text-base font-bold ${isLowBalance ? 'text-rose-600' : 'text-zinc-900'}`}>
+                            <div
+                              className={`flex items-center justify-center gap-1 font-mono text-base font-bold ${isLowBalance ? 'text-rose-600' : 'text-zinc-900'}`}
+                            >
                               {isLowBalance && <AlertCircle size={14} strokeWidth={2.5} />}
                               <span>{row.余额 ? `¥${row.余额}` : '--'}</span>
                             </div>
@@ -451,7 +618,6 @@ export default function App() {
                             {row.roi}
                           </td>
 
-                          {/* 操作列 */}
                           <td className="px-3 py-2.5 text-center whitespace-nowrap">
                             <div className="flex items-center justify-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
                               <Input
