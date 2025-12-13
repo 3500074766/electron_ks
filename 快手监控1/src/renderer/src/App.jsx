@@ -1058,7 +1058,7 @@ export default function App() {
                           : costVal > parseFloat(maxCost)
                             ? 'danger'
                             : 'success'
-                        : 'success'
+                        : 'default'
 
                       return (
                         <tr
