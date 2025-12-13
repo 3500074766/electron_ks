@@ -1131,7 +1131,7 @@ export default function App() {
                           </td>
 
                           <td
-                            className="px-3 py-2.5 font-mono text-base font-bold text-blue-600 text-center whitespace-nowrap relative group/history cursor-help"
+                            className="px-3 py-2.5 font-mono text-base font-bold text-blue-600 text-center whitespace-nowrap relative group/history"
                             onDoubleClick={(e) => openHistory(row, e)}
                             title="双击查看修改记录"
                           >
