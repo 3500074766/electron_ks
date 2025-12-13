@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
-// 已启用本地二维码组件
 import { QRCodeCanvas } from 'qrcode.react'
 import {
   Activity,
@@ -13,7 +12,13 @@ import {
   CheckCircle,
   XCircle,
   AlertTriangle,
-  CreditCard
+  CreditCard,
+  History,
+  ArrowRight,
+  FileText,
+  User,
+  Calendar,
+  MoveRight
 } from 'lucide-react'
 
 // --- UI Components ---
@@ -60,7 +65,7 @@ const Button = ({
   )
 }
 
-// Input 组件：包含滚轮吸附逻辑和整数限制
+// Input Component
 const Input = ({
   value,
   onChange,
@@ -74,8 +79,8 @@ const Input = ({
   max = Infinity,
   wheelMin = -Infinity,
   wheelMax = Infinity,
-  step = null, // 控制滚轮步长
-  integerOnly = false // 是否只允许整数
+  step = null,
+  integerOnly = false
 }) => {
   const inputRef = useRef(null)
   const sizeClass = size === 'sm' ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm'
@@ -113,18 +118,15 @@ const Input = ({
       return
     }
 
-    // 正则校验
     if (integerOnly) {
-      if (!/^\d*$/.test(val)) return // 仅允许纯数字
+      if (!/^\d*$/.test(val)) return
     } else {
-      if (!/^\d*\.?\d*$/.test(val)) return // 允许小数
+      if (!/^\d*\.?\d*$/.test(val)) return
     }
 
-    // 范围校验（输入时不强制截断，只在失焦或提交时建议，但为了体验这里做简单限制）
     const numVal = parseFloat(val)
     if (!isNaN(numVal)) {
-      if (numVal > max) return // 禁止超过最大值
-      // 最小值通常不在输入时限制，否则无法删除数字，留给 Button disabled 控制
+      if (numVal > max) return
     }
 
     onChange(e)
@@ -149,7 +151,6 @@ const Input = ({
           step
         } = latestProps.current
 
-        // 确定方向
         const isUp = e.deltaY < 0
 
         let baseValue = currValue
@@ -162,22 +163,17 @@ const Input = ({
 
         let newValue
 
-        // --- 核心逻辑：如果有 step (如10)，则吸附到倍数 ---
         if (step && step > 0) {
           if (isUp) {
-            // 向上：取下一个整数倍。例：1 -> 10, 11 -> 20
             newValue = (Math.floor(numVal / step) + 1) * step
           } else {
-            // 向下：取上一个整数倍。例：11 -> 10, 9 -> 0
             newValue = (Math.ceil(numVal / step) - 1) * step
           }
         } else {
-          // 默认逻辑
           const delta = isUp ? 1 : -1
           newValue = Math.round((numVal + delta) * 100) / 100
         }
 
-        // --- 边界限制 ---
         const effectiveMin = wheelMin !== -Infinity ? wheelMin : min
         const effectiveMax = wheelMax !== -Infinity ? wheelMax : max
 
@@ -226,7 +222,6 @@ const Badge = ({ children, color = 'default' }) => {
   )
 }
 
-// 确认弹窗组件
 const ConfirmModal = ({ isOpen, title, content, onConfirm, onCancel }) => {
   if (!isOpen) return null
   return (
@@ -259,14 +254,12 @@ const ConfirmModal = ({ isOpen, title, content, onConfirm, onCancel }) => {
   )
 }
 
-// 充值弹窗组件
 const RechargeModal = ({ isOpen, onClose, data }) => {
   const [amount, setAmount] = useState('')
-  const [step, setStep] = useState('input') // input, loading, qr
+  const [step, setStep] = useState('input')
   const [qrUrl, setQrUrl] = useState('')
   const [error, setError] = useState('')
 
-  // Reset state when modal opens
   useEffect(() => {
     if (isOpen) {
       setAmount('')
@@ -276,14 +269,11 @@ const RechargeModal = ({ isOpen, onClose, data }) => {
     }
   }, [isOpen])
 
-  // 处理关闭/返回逻辑
   const handleCloseOrBack = () => {
     if (step === 'qr') {
-      // 如果在二维码页面，返回输入页面
       setStep('input')
       setQrUrl('')
     } else {
-      // 如果在输入页面，直接关闭弹窗
       onClose()
     }
   }
@@ -322,7 +312,6 @@ const RechargeModal = ({ isOpen, onClose, data }) => {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden border border-zinc-100 flex flex-col">
-        {/* 头部区域 */}
         <div className="px-6 py-4 border-b border-zinc-100 flex justify-between items-center bg-zinc-50/50">
           <h3 className="text-lg font-bold text-zinc-800 flex items-center gap-2">
             <CreditCard size={20} className="text-blue-600" />
@@ -331,7 +320,6 @@ const RechargeModal = ({ isOpen, onClose, data }) => {
           <button
             onClick={handleCloseOrBack}
             className="text-zinc-400 hover:text-zinc-600 transition-colors"
-            title={step === 'qr' ? '返回修改金额' : '关闭'}
           >
             <XCircle size={20} />
           </button>
@@ -346,7 +334,6 @@ const RechargeModal = ({ isOpen, onClose, data }) => {
                   <div className="w-10 h-10 rounded-lg bg-zinc-200 overflow-hidden shrink-0 shadow-sm">
                     {data.头像 && <img src={data.头像} className="w-full h-full object-cover" />}
                   </div>
-                  {/* 名字：加粗 font-bold，变大 text-lg */}
                   <span className="truncate text-lg font-bold">{data.名称}</span>
                 </div>
               </div>
@@ -368,7 +355,6 @@ const RechargeModal = ({ isOpen, onClose, data }) => {
                 {error && <p className="text-rose-500 text-xs mt-2 text-center">{error}</p>}
               </div>
 
-              {/* ✅ 修改点：增加 parseFloat(amount) < 1 判断，防止0或空值提交 */}
               <Button
                 onClick={handleCreateOrder}
                 loading={step === 'loading'}
@@ -379,7 +365,6 @@ const RechargeModal = ({ isOpen, onClose, data }) => {
               </Button>
             </>
           ) : (
-            // --- 二维码显示页面 ---
             <div className="flex flex-col items-center animate-in zoom-in duration-300 w-full">
               <div className="flex items-center gap-2 mb-4 bg-blue-50 px-6 py-2 rounded-full">
                 <div className="w-8 h-8 rounded-lg bg-zinc-200 overflow-hidden shrink-0">
@@ -404,6 +389,143 @@ const RechargeModal = ({ isOpen, onClose, data }) => {
                 正在检测支付结果...
               </div>
             </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// --- History Modal Component (Revised) ---
+const HistoryModal = ({ isOpen, onClose, data }) => {
+  const [loading, setLoading] = useState(false)
+  const [records, setRecords] = useState([])
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (isOpen && data) {
+      const fetchData = async () => {
+        setLoading(true)
+        setError(null)
+        setRecords([])
+
+        if (!data.target_id) {
+          setError('当前用户无计划ID，无法查询')
+          setLoading(false)
+          return
+        }
+
+        try {
+          const res = await window.api.getPlanRecords(data.UID, data.target_id)
+          if (res.status === 'success') {
+            setRecords(res.data)
+          } else {
+            setError(res.message || '获取记录失败')
+          }
+        } catch (err) {
+          setError('网络连接异常')
+        } finally {
+          setLoading(false)
+        }
+      }
+      fetchData()
+    }
+  }, [isOpen, data])
+
+  // Helper to extract HH:mm:ss from timestamp string
+  const formatOnlyTime = (dateStr) => {
+    if (!dateStr) return '--'
+    const parts = dateStr.split(' ')
+    return parts.length > 1 ? parts[1] : dateStr
+  }
+
+  if (!isOpen || !data) return null
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-[5px] animate-in fade-in duration-200"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-2xl w-[500px] max-h-[85vh] flex flex-col border border-zinc-100 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header - Re-arranged for cleaner look */}
+        <div className="px-6 py-5 border-b border-zinc-100 flex justify-between items-start bg-white">
+          <div className="flex items-center gap-3">
+            {/* Avatar - Slightly larger and cleaner */}
+            <div className="w-11 h-11 rounded-lg bg-zinc-100 overflow-hidden shrink-0 border border-zinc-100 shadow-sm">
+              {data.头像 && <img src={data.头像} className="w-full h-full object-cover" />}
+            </div>
+
+            {/* Info - Re-ordered: Name+Badge top, ID bottom */}
+            <div className="flex flex-col gap-1 justify-center pt-0.5">
+              <div className="flex items-center gap-3">
+                <h3 className="text-xl font-bold text-zinc-900 leading-none tracking-tight">
+                  {data.名称}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2 text-zinc-400 text-xs">
+                <span>ID:</span>
+                <span className="font-mono text-zinc-500 font-medium text-sm tracking-wide">
+                  {data.target_id || '--'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="text-zinc-400 hover:text-zinc-700 transition-colors p-2 hover:bg-zinc-100 rounded-full mt-1"
+          >
+            <XCircle size={24} />
+          </button>
+        </div>
+
+        {/* Content - Centered and Larger Text Table */}
+        <div className="flex-1 overflow-y-auto bg-white min-h-[200px] p-0">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center h-48 gap-3 text-zinc-400">
+              <RefreshCw size={24} className="animate-spin text-blue-500" />
+              <span className="text-base">加载中...</span>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center h-48 gap-2 text-rose-500">
+              <AlertCircle size={24} />
+              <span className="text-base">{error}</span>
+            </div>
+          ) : records.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-48 gap-2 text-zinc-400">
+              <History size={32} className="opacity-20" />
+              <span className="text-base">暂无记录</span>
+            </div>
+          ) : (
+            <table className="w-full text-base text-center border-collapse">
+              <thead className="bg-zinc-50 text-zinc-500 font-medium border-b border-zinc-100 sticky top-0">
+                <tr>
+                  <th className="px-4 py-2 text-base">时间</th>
+                  <th className="px-4 py-2 text-base">事件</th>
+                  <th className="px-4 py-2 text-base">修改前</th>
+                  <th className="px-4 py-2 text-base">修改后</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100">
+                {records.map((rec, i) => (
+                  <tr key={i} className="hover:bg-zinc-50/60 transition-colors">
+                    <td className="px-4 py-3.5 font-base text-zinc-600 whitespace-nowrap">
+                      {formatOnlyTime(rec.time)}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span className="text-xs bg-zinc-100 text-zinc-600 px-2.5 py-1 rounded-full border border-zinc-200 inline-block font-medium">
+                        {rec.event}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5 font-base text-zinc-600">{rec.original}</td>
+                    <td className="px-4 py-3.5 font-base text-zinc-600 ">{rec.updated}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
       </div>
@@ -474,36 +596,31 @@ const COLUMNS = [
   { label: '操作', key: null, width: 'w-38', align: 'center' }
 ]
 
-// --- Main Logic ---
 export default function App() {
   const [activeTab, setActiveTab] = useState('monitor')
   const [loading, setLoading] = useState(false)
   const [notification, setNotification] = useState({ message: '', type: '' })
 
-  // Modal State
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, data: null })
   const [rechargeModal, setRechargeModal] = useState({ isOpen: false, data: null })
+  const [historyModal, setHistoryModal] = useState({ isOpen: false, data: null })
 
-  // Settings
   const [minCost, setMinCost] = useState(0.5)
   const [maxCost, setMaxCost] = useState(2.0)
   const [refreshInterval, setRefreshInterval] = useState(10)
   const [tempInterval, setTempInterval] = useState('10')
 
-  // Data
   const [tableData, setTableData] = useState([])
   const [lastUpdateTime, setLastUpdateTime] = useState(null)
   const [selectedUid, setSelectedUid] = useState(null)
 
   const [countdown, setCountdown] = useState(600)
-
   const [sortConfig, setSortConfig] = useState({ key: null, direction: null })
   const dataMapRef = useRef(new Map())
 
   const isManualRefresh = useRef(false)
   const isEditingInterval = useRef(false)
 
-  // Helpers
   const formatTime = (s) => {
     const safeS = parseInt(s, 10)
     if (isNaN(safeS)) return '00:00'
@@ -647,13 +764,7 @@ export default function App() {
 
   const submitRoi = async (row, e) => {
     e && e.stopPropagation()
-
-    // --- 空值处理逻辑 ---
-    // 如果没有输入值，直接返回，不进行任何操作（满足“空值回车没用”）
-    if (!row.editRoi || !String(row.editRoi).trim()) {
-      return
-    }
-    // ------------------
+    if (!row.editRoi || !String(row.editRoi).trim()) return
 
     const newRoi = parseFloat(row.editRoi)
 
@@ -686,10 +797,14 @@ export default function App() {
     showNotify('已取消修改', 'warning')
   }
 
-  // Open Recharge Modal
   const openRecharge = (row, e) => {
     e.stopPropagation()
     setRechargeModal({ isOpen: true, data: row })
+  }
+
+  const openHistory = (row, e) => {
+    e.stopPropagation()
+    setHistoryModal({ isOpen: true, data: row })
   }
 
   useEffect(() => {
@@ -702,20 +817,14 @@ export default function App() {
       }
     }
 
-    // Listen for Recharge Success
     const handleRechargeSuccess = (res) => {
-      // Close modal if it belongs to the user
       setRechargeModal((prev) => {
         if (prev.isOpen && prev.data?.UID === res.uid) {
           return { isOpen: false, data: null }
         }
         return prev
       })
-
-      // Show Success Toast
       showNotify(`${res.name} 充值 ${res.amount} 元成功!`, 'success')
-
-      // Optionally refresh data to show new balance
       refreshAll()
     }
 
@@ -723,7 +832,6 @@ export default function App() {
       window.api.on('kuaishou_data', handleDataUpdate),
       window.api.on('roi_data', handleDataUpdate),
       window.api.on('wallet_data', handleDataUpdate),
-
       window.api.on('users_data', (res) => {
         if (res.status === 'success') {
           mergeData(res.data, !isManualRefresh.current)
@@ -747,7 +855,6 @@ export default function App() {
         setLoading(false)
         if (res.status !== 'success') console.error(res.message)
       }),
-      // Register listener
       window.api.on('recharge_success', handleRechargeSuccess)
     ]
     ;(async () => {
@@ -798,7 +905,6 @@ export default function App() {
         onClose={() => setNotification({ message: '', type: '' })}
       />
 
-      {/* Confirmation Modal */}
       <ConfirmModal
         isOpen={confirmModal.isOpen}
         title="确认大幅修改 ROI？"
@@ -811,14 +917,19 @@ export default function App() {
         onCancel={handleCancelUpdate}
       />
 
-      {/* Recharge Modal */}
       <RechargeModal
         isOpen={rechargeModal.isOpen}
         data={rechargeModal.data}
         onClose={() => setRechargeModal({ isOpen: false, data: null })}
       />
 
-      <div className="w-64 bg-white border-r border-zinc-100 flex flex-col z-10 shadow-sm">
+      <HistoryModal
+        isOpen={historyModal.isOpen}
+        data={historyModal.data}
+        onClose={() => setHistoryModal({ isOpen: false, data: null })}
+      />
+
+      <div className="w-50 bg-white border-r border-zinc-100 flex flex-col z-10 shadow-sm">
         <div className="h-20 flex items-center px-6 border-b border-zinc-50 gap-3">
           <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-blue-200 shadow-md">
             KS
@@ -943,19 +1054,20 @@ export default function App() {
 
                       let badge = !isNaN(costVal)
                         ? costVal < parseFloat(minCost)
-                          ? 'success'
+                          ? 'default'
                           : costVal > parseFloat(maxCost)
                             ? 'danger'
-                            : 'default'
-                        : 'default'
+                            : 'success'
+                        : 'success'
+
                       return (
                         <tr
                           key={row.UID}
                           onClick={() => setSelectedUid(row.UID)}
                           className={`
-                            transition-all duration-200 cursor-pointer group border-b border-zinc-50 last:border-0 select-none
-                            ${isSelected ? 'bg-blue-100/60 hover:bg-blue-100' : 'hover:bg-blue-50'}
-                          `}
+                              transition-all duration-200 cursor-pointer group border-b border-zinc-50 last:border-0 select-none
+                              ${isSelected ? 'bg-blue-100/60 hover:bg-blue-100' : 'hover:bg-blue-50'}
+                            `}
                         >
                           <td className="pl-8 pr-3 py-2.5 text-left w-56">
                             <div className="flex items-center gap-2">
@@ -1017,8 +1129,18 @@ export default function App() {
                           <td className="px-3 py-2.5 font-mono text-base font-bold text-zinc-800 text-center whitespace-nowrap">
                             {row.全站ROI}
                           </td>
-                          <td className="px-3 py-2.5 font-mono text-base font-bold text-blue-600 text-center whitespace-nowrap">
-                            {row.roi}
+
+                          <td
+                            className="px-3 py-2.5 font-mono text-base font-bold text-blue-600 text-center whitespace-nowrap relative group/history cursor-help"
+                            onDoubleClick={(e) => openHistory(row, e)}
+                            title="双击查看修改记录"
+                          >
+                            <div className="flex items-center justify-center gap-1 relative">
+                              {row.roi}
+                              <div className="absolute -top-3 right-0 opacity-0 group-hover/history:opacity-100 transition-opacity pointer-events-none">
+                                <History size={10} className="text-blue-300" />
+                              </div>
+                            </div>
                           </td>
 
                           <td className="px-3 py-2.5 text-center whitespace-nowrap">
@@ -1029,14 +1151,12 @@ export default function App() {
                                 placeholder={row.roi}
                                 value={row.editRoi || ''}
                                 onChange={(e) => handleEditRoiChange(row.UID, e.target.value)}
-                                // --- 添加回车修改功能 ---
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') {
                                     submitRoi(row, e)
-                                    e.target.blur() // 修改后失去焦点
+                                    e.target.blur()
                                   }
                                 }}
-                                // -----------------------
                                 min={0}
                                 max={100}
                                 wheelMin={1}
@@ -1046,9 +1166,7 @@ export default function App() {
                                 size="sm"
                                 className="!px-2 !text-base shadow-sm"
                                 onClick={(e) => submitRoi(row, e)}
-                                // --- 空值禁用修改 ---
                                 disabled={!row.editRoi || !String(row.editRoi).trim()}
-                                // ------------------
                               >
                                 改
                               </Button>

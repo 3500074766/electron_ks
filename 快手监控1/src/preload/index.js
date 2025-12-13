@@ -18,9 +18,10 @@ const api = {
   getCountdownState: () => ipcRenderer.invoke('get_countdown_state'),
   resumeCountdown: () => ipcRenderer.invoke('resume_countdown'),
   resetRoiCountdown: () => ipcRenderer.invoke('reset_roi_countdown'),
-
-  // 必须添加这行，确保前端能调用到 create_recharge
   createRecharge: (uid, amount) => ipcRenderer.invoke('create_recharge', { uid, amount }),
+
+  // 新增获取计划修改记录 API
+  getPlanRecords: (uid, target_id) => ipcRenderer.invoke('get_plan_records', { uid, target_id }),
 }
 
 if (process.contextIsolated) {

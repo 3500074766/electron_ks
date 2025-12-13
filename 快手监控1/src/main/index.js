@@ -8,9 +8,9 @@ import { registerIPC } from './ipc/routes.js'
 function createWindow() {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 1100,
+    width: 1360,
     height: 800,
-    minWidth: 1100,
+    minWidth: 1360,
     minHeight: 800,
     show: false,
     autoHideMenuBar: true,

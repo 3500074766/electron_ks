@@ -4,7 +4,8 @@ import { KuaishouService } from '../services/kuaishouService.js'
 import { RoiService } from '../services/roiService.js'
 import { CountdownService } from '../services/countdownService.js'
 import { WalletService } from '../services/walletService.js'
-import { RechargeService } from '../services/rechargeService.js' // Import
+import { RechargeService } from '../services/rechargeService.js'
+import { PlanService } from '../services/planService.js' // Import
 
 export function registerIPC(mainWindow) {
   const send = (channel, payload) => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.webContents.send(channel, payload) } }
@@ -13,8 +14,8 @@ export function registerIPC(mainWindow) {
   const ksSvc = new KuaishouService()
   const roiSvc = new RoiService()
   const walletSvc = new WalletService()
-  // Instantiate RechargeService
   const rechargeSvc = new RechargeService(mainWindow)
+  const planSvc = new PlanService() // Instantiate
 
   const cdSvc = new CountdownService({ usersSvc, ksSvc, roiSvc, walletSvc, send })
 
@@ -120,7 +121,6 @@ export function registerIPC(mainWindow) {
     return { type: 'countdown_state', status: 'success', data: cdSvc.getState() }
   })
 
-  // === New Recharge Route ===
   ipcMain.handle('create_recharge', async (_event, payload) => {
     try {
       const { uid, amount } = payload
@@ -137,6 +137,26 @@ export function registerIPC(mainWindow) {
       return {
         status: 'error',
         message: e.message || '充值发起失败'
+      }
+    }
+  })
+
+  // === New Plan Record Route ===
+  ipcMain.handle('get_plan_records', async (_event, payload) => {
+    try {
+      const { uid, target_id } = payload
+      const user = await usersSvc.getUserByUid(uid)
+      if (!user) throw new Error('用户不存在')
+
+      const records = await planSvc.fetchPlanModifyRecords(user, target_id)
+      return {
+        status: 'success',
+        data: records
+      }
+    } catch (e) {
+      return {
+        status: 'error',
+        message: e.message || '获取记录失败'
       }
     }
   })
