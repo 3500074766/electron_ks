@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
+// 已启用本地二维码组件
+import { QRCodeCanvas } from 'qrcode.react'
 import {
   Activity,
   TrendingUp,
@@ -11,7 +13,7 @@ import {
   CheckCircle,
   XCircle,
   AlertTriangle,
-  CreditCard // Icon for recharge
+  CreditCard
 } from 'lucide-react'
 
 // --- UI Components ---
@@ -58,6 +60,7 @@ const Button = ({
   )
 }
 
+// Input 组件：包含滚轮吸附逻辑和整数限制
 const Input = ({
   value,
   onChange,
@@ -70,16 +73,38 @@ const Input = ({
   min = -Infinity,
   max = Infinity,
   wheelMin = -Infinity,
-  wheelMax = Infinity
+  wheelMax = Infinity,
+  step = null, // 控制滚轮步长
+  integerOnly = false // 是否只允许整数
 }) => {
   const inputRef = useRef(null)
   const sizeClass = size === 'sm' ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm'
 
-  const latestProps = useRef({ value, onChange, placeholder, min, max, wheelMin, wheelMax })
+  const latestProps = useRef({
+    value,
+    onChange,
+    placeholder,
+    min,
+    max,
+    wheelMin,
+    wheelMax,
+    step,
+    integerOnly
+  })
 
   useEffect(() => {
-    latestProps.current = { value, onChange, placeholder, min, max, wheelMin, wheelMax }
-  }, [value, onChange, placeholder, min, max, wheelMin, wheelMax])
+    latestProps.current = {
+      value,
+      onChange,
+      placeholder,
+      min,
+      max,
+      wheelMin,
+      wheelMax,
+      step,
+      integerOnly
+    }
+  }, [value, onChange, placeholder, min, max, wheelMin, wheelMax, step, integerOnly])
 
   const handleInputChange = (e) => {
     const val = e.target.value
@@ -88,12 +113,18 @@ const Input = ({
       return
     }
 
-    if (!/^\d*\.?\d*$/.test(val)) return
+    // 正则校验
+    if (integerOnly) {
+      if (!/^\d*$/.test(val)) return // 仅允许纯数字
+    } else {
+      if (!/^\d*\.?\d*$/.test(val)) return // 允许小数
+    }
 
+    // 范围校验（输入时不强制截断，只在失焦或提交时建议，但为了体验这里做简单限制）
     const numVal = parseFloat(val)
     if (!isNaN(numVal)) {
-      if (numVal > max) return
-      if (numVal < 0) return
+      if (numVal > max) return // 禁止超过最大值
+      // 最小值通常不在输入时限制，否则无法删除数字，留给 Button disabled 控制
     }
 
     onChange(e)
@@ -112,23 +143,46 @@ const Input = ({
           onChange: currOnChange,
           placeholder: currPlaceholder,
           wheelMin,
-          wheelMax
+          wheelMax,
+          min,
+          max,
+          step
         } = latestProps.current
 
-        const delta = e.deltaY < 0 ? 1 : -1
+        // 确定方向
+        const isUp = e.deltaY < 0
 
         let baseValue = currValue
         if (baseValue === '' || baseValue === null || baseValue === undefined) {
-          baseValue = currPlaceholder
+          baseValue = currPlaceholder || (min !== -Infinity ? String(min) : '0')
         }
 
         let numVal = parseFloat(baseValue)
-        if (isNaN(numVal)) return
+        if (isNaN(numVal)) numVal = 0
 
-        let newValue = Math.round((numVal + delta) * 100) / 100
+        let newValue
 
-        if (wheelMin !== -Infinity && newValue < wheelMin) return
-        if (wheelMax !== -Infinity && newValue > wheelMax) return
+        // --- 核心逻辑：如果有 step (如10)，则吸附到倍数 ---
+        if (step && step > 0) {
+          if (isUp) {
+            // 向上：取下一个整数倍。例：1 -> 10, 11 -> 20
+            newValue = (Math.floor(numVal / step) + 1) * step
+          } else {
+            // 向下：取上一个整数倍。例：11 -> 10, 9 -> 0
+            newValue = (Math.ceil(numVal / step) - 1) * step
+          }
+        } else {
+          // 默认逻辑
+          const delta = isUp ? 1 : -1
+          newValue = Math.round((numVal + delta) * 100) / 100
+        }
+
+        // --- 边界限制 ---
+        const effectiveMin = wheelMin !== -Infinity ? wheelMin : min
+        const effectiveMax = wheelMax !== -Infinity ? wheelMax : max
+
+        if (effectiveMin !== -Infinity && newValue < effectiveMin) newValue = effectiveMin
+        if (effectiveMax !== -Infinity && newValue > effectiveMax) newValue = effectiveMax
 
         if (currOnChange) {
           currOnChange({ target: { value: String(newValue) } })
@@ -207,126 +261,155 @@ const ConfirmModal = ({ isOpen, title, content, onConfirm, onCancel }) => {
 
 // 充值弹窗组件
 const RechargeModal = ({ isOpen, onClose, data }) => {
-    // 修改：默认金额为空字符串
-    const [amount, setAmount] = useState('')
-    const [step, setStep] = useState('input') // input, loading, qr
-    const [qrUrl, setQrUrl] = useState('')
-    const [error, setError] = useState('')
+  const [amount, setAmount] = useState('')
+  const [step, setStep] = useState('input') // input, loading, qr
+  const [qrUrl, setQrUrl] = useState('')
+  const [error, setError] = useState('')
 
-    // Reset state when modal opens
-    useEffect(() => {
-        if (isOpen) {
-            // 修改：重置金额为空字符串
-            setAmount('')
-            setStep('input')
-            setQrUrl('')
-            setError('')
-        }
-    }, [isOpen])
+  // Reset state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setAmount('')
+      setStep('input')
+      setQrUrl('')
+      setError('')
+    }
+  }, [isOpen])
 
-    const handleCreateOrder = async () => {
-        // 修改：增加空值检查
-        if (!amount || parseFloat(amount) <= 0) {
-            setError('请输入有效的充值金额')
-            return
-        }
+  // 处理关闭/返回逻辑
+  const handleCloseOrBack = () => {
+    if (step === 'qr') {
+      // 如果在二维码页面，返回输入页面
+      setStep('input')
+      setQrUrl('')
+    } else {
+      // 如果在输入页面，直接关闭弹窗
+      onClose()
+    }
+  }
 
-        setStep('loading')
-        setError('')
-
-        try {
-            // 检查 API 是否存在，防止报错
-            if (!window.api || typeof window.api.createRecharge !== 'function') {
-                throw new Error('充值功能未正确初始化，请重启应用')
-            }
-
-            const res = await window.api.createRecharge(data.UID, amount)
-            if (res.status === 'success' && res.data.qrUrl) {
-                setQrUrl(res.data.qrUrl)
-                setStep('qr')
-            } else {
-                setError(res.message || '获取二维码失败')
-                setStep('input')
-            }
-        } catch (e) {
-            console.error(e)
-            setError(e.message || '网络异常')
-            setStep('input')
-        }
+  const handleCreateOrder = async () => {
+    if (!amount || parseFloat(amount) <= 0) {
+      setError('请输入有效的充值金额')
+      return
     }
 
-    if (!isOpen || !data) return null
+    setStep('loading')
+    setError('')
 
-    return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden border border-zinc-100 flex flex-col">
-                <div className="px-6 py-4 border-b border-zinc-100 flex justify-between items-center bg-zinc-50/50">
-                    <h3 className="text-lg font-bold text-zinc-800 flex items-center gap-2">
-                        <CreditCard size={20} className="text-blue-600"/>
-                        账户充值
-                    </h3>
-                    <button onClick={onClose} className="text-zinc-400 hover:text-zinc-600 transition-colors">
-                        <XCircle size={20} />
-                    </button>
-                </div>
+    try {
+      if (!window.api || typeof window.api.createRecharge !== 'function') {
+        throw new Error('充值功能未正确初始化，请重启应用')
+      }
 
-                <div className="p-8 flex flex-col items-center">
-                    {step === 'input' || step === 'loading' ? (
-                        <>
-                            <div className="mb-6 w-full">
-                                <label className="block text-sm font-medium text-zinc-500 mb-2">充值用户</label>
-                                <div className="p-3 bg-zinc-50 rounded-lg text-zinc-800 font-medium flex items-center gap-2">
-                                    <div className="w-6 h-6 rounded bg-zinc-200 overflow-hidden">
-                                        {data.头像 && <img src={data.头像} className="w-full h-full object-cover" />}
-                                    </div>
-                                    <span className="truncate">{data.名称}</span>
-                                </div>
-                            </div>
+      const res = await window.api.createRecharge(data.UID, amount)
+      if (res.status === 'success' && res.data.qrUrl) {
+        setQrUrl(res.data.qrUrl)
+        setStep('qr')
+      } else {
+        setError(res.message || '获取二维码失败')
+        setStep('input')
+      }
+    } catch (e) {
+      console.error(e)
+      setError(e.message || '网络异常')
+      setStep('input')
+    }
+  }
 
-                            <div className="mb-8 w-full">
-                                <label className="block text-sm font-medium text-zinc-500 mb-2">充值金额 (元)</label>
-                                <Input
-                                    value={amount}
-                                    onChange={(e) => setAmount(e.target.value)}
-                                    className="!text-xl font-bold text-center !py-3"
-                                    placeholder="请输入金额"
-                                />
-                                {error && <p className="text-rose-500 text-xs mt-2 text-center">{error}</p>}
-                            </div>
+  if (!isOpen || !data) return null
 
-                            <Button
-                                onClick={handleCreateOrder}
-                                loading={step === 'loading'}
-                                disabled={!amount}
-                                className="w-full !text-lg !py-3 shadow-lg shadow-blue-200"
-                            >
-                                {step === 'loading' ? '正在创建订单...' : '生成充值二维码'}
-                            </Button>
-                        </>
-                    ) : (
-                        <div className="flex flex-col items-center animate-in zoom-in duration-300">
-                            <div className="bg-white p-2 rounded-xl border border-zinc-200 shadow-inner mb-4">
-                                <img
-                                    // Use a public API to generate QR code image from the URL string
-                                    src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(qrUrl)}`}
-                                    alt="Recharge QR"
-                                    className="w-48 h-48"
-                                />
-                            </div>
-                            <p className="text-zinc-800 font-bold text-lg mb-1">¥ {amount}</p>
-                            <p className="text-zinc-500 text-sm mb-6">请使用快手 App 扫码支付</p>
-                            <div className="flex items-center gap-2 text-blue-600 bg-blue-50 px-4 py-2 rounded-full text-xs font-medium animate-pulse">
-                                <RefreshCw size={12} className="animate-spin" />
-                                正在检测支付结果...
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden border border-zinc-100 flex flex-col">
+        {/* 头部区域 */}
+        <div className="px-6 py-4 border-b border-zinc-100 flex justify-between items-center bg-zinc-50/50">
+          <h3 className="text-lg font-bold text-zinc-800 flex items-center gap-2">
+            <CreditCard size={20} className="text-blue-600" />
+            账户充值
+          </h3>
+          <button
+            onClick={handleCloseOrBack}
+            className="text-zinc-400 hover:text-zinc-600 transition-colors"
+            title={step === 'qr' ? '返回修改金额' : '关闭'}
+          >
+            <XCircle size={20} />
+          </button>
         </div>
-    )
-}
 
+        <div className="p-8 flex flex-col items-center">
+          {step === 'input' || step === 'loading' ? (
+            <>
+              <div className="mb-6 w-full">
+                <label className="block text-sm font-medium text-zinc-500 mb-2">充值用户</label>
+                <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-200/60 text-zinc-800 flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-zinc-200 overflow-hidden shrink-0 shadow-sm">
+                    {data.头像 && <img src={data.头像} className="w-full h-full object-cover" />}
+                  </div>
+                  {/* 名字：加粗 font-bold，变大 text-lg */}
+                  <span className="truncate text-lg font-bold">{data.名称}</span>
+                </div>
+              </div>
+
+              <div className="mb-8 w-full">
+                <label className="block text-sm font-medium text-zinc-500 mb-2">
+                  充值金额 (元)
+                </label>
+                <Input
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="!text-xl font-bold text-center !py-3"
+                  placeholder="请输入金额"
+                  min={1}
+                  max={500000}
+                  step={10}
+                  integerOnly={true}
+                />
+                {error && <p className="text-rose-500 text-xs mt-2 text-center">{error}</p>}
+              </div>
+
+              {/* ✅ 修改点：增加 parseFloat(amount) < 1 判断，防止0或空值提交 */}
+              <Button
+                onClick={handleCreateOrder}
+                loading={step === 'loading'}
+                disabled={!amount || parseFloat(amount) < 1}
+                className="w-full !text-lg !py-3 shadow-lg shadow-blue-200"
+              >
+                {step === 'loading' ? '正在创建订单...' : '生成支付二维码'}
+              </Button>
+            </>
+          ) : (
+            // --- 二维码显示页面 ---
+            <div className="flex flex-col items-center animate-in zoom-in duration-300 w-full">
+              <div className="flex items-center gap-2 mb-4 bg-blue-50 px-6 py-2 rounded-full">
+                <div className="w-8 h-8 rounded-lg bg-zinc-200 overflow-hidden shrink-0">
+                  {data.头像 && <img src={data.头像} className="w-full h-full object-cover" />}
+                </div>
+                <span className="text-lg font-bold text-blue-800">{data.名称}</span>
+              </div>
+
+              <div className="bg-white p-2 rounded-xl border border-zinc-200 shadow-inner mb-4 flex items-center justify-center overflow-hidden">
+                <QRCodeCanvas value={qrUrl} size={190} level="M" className="rounded-lg" />
+              </div>
+
+              <p className="text-zinc-800 font-bold text-2xl mb-1">¥ {amount}</p>
+
+              <p className="text-zinc-500 text-sm mb-6">
+                请使用 <span className="font-bold text-green-600">微信</span> /{' '}
+                <span className="font-bold text-blue-500">支付宝</span> 扫码支付
+              </p>
+
+              <div className="flex items-center gap-2 text-blue-600 bg-blue-50 px-4 py-2 rounded-full text-xs font-medium animate-pulse">
+                <RefreshCw size={12} className="animate-spin" />
+                正在检测支付结果...
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const Toast = ({ message, type, onClose }) => {
   const [isVisible, setIsVisible] = useState(false)
@@ -338,7 +421,7 @@ const Toast = ({ message, type, onClose }) => {
       requestAnimationFrame(() => setIsVisible(true))
       const timer = setTimeout(() => {
         setIsVisible(false)
-      }, 3000) // Increased duration for recharge success messages
+      }, 3000)
       return () => clearTimeout(timer)
     }
   }, [message])
@@ -381,13 +464,14 @@ const Toast = ({ message, type, onClose }) => {
 const COLUMNS = [
   { label: '用户', key: null, width: 'w-56', align: 'left' },
   { label: 'GMV', key: 'GMV', width: '', align: 'center' },
+  { label: '订单数', key: '订单数', width: '', align: 'center' },
   { label: '上次', key: '上次花费', width: '', align: 'center' },
   { label: '花费', key: '花费', width: '', align: 'center' },
   { label: '消耗', key: '消耗', width: '', align: 'center' },
   { label: '余额', key: '余额', width: '', align: 'center' },
   { label: '全站ROI', key: '全站ROI', width: '', align: 'center' },
   { label: '投放ROI', key: 'roi', width: '', align: 'center' },
-  { label: '操作', key: null, width: 'w-48', align: 'center' } // Increased width for recharge button
+  { label: '操作', key: null, width: 'w-38', align: 'center' }
 ]
 
 // --- Main Logic ---
@@ -563,6 +647,14 @@ export default function App() {
 
   const submitRoi = async (row, e) => {
     e && e.stopPropagation()
+
+    // --- 空值处理逻辑 ---
+    // 如果没有输入值，直接返回，不进行任何操作（满足“空值回车没用”）
+    if (!row.editRoi || !String(row.editRoi).trim()) {
+      return
+    }
+    // ------------------
+
     const newRoi = parseFloat(row.editRoi)
 
     if (isNaN(newRoi)) return showNotify('请输入有效数字', 'error')
@@ -596,8 +688,8 @@ export default function App() {
 
   // Open Recharge Modal
   const openRecharge = (row, e) => {
-      e.stopPropagation()
-      setRechargeModal({ isOpen: true, data: row })
+    e.stopPropagation()
+    setRechargeModal({ isOpen: true, data: row })
   }
 
   useEffect(() => {
@@ -612,19 +704,19 @@ export default function App() {
 
     // Listen for Recharge Success
     const handleRechargeSuccess = (res) => {
-        // Close modal if it belongs to the user
-        setRechargeModal((prev) => {
-            if (prev.isOpen && prev.data?.UID === res.uid) {
-                return { isOpen: false, data: null }
-            }
-            return prev
-        })
+      // Close modal if it belongs to the user
+      setRechargeModal((prev) => {
+        if (prev.isOpen && prev.data?.UID === res.uid) {
+          return { isOpen: false, data: null }
+        }
+        return prev
+      })
 
-        // Show Success Toast
-        showNotify(`${res.name} 充值 ${res.amount} 元成功!`, 'success')
+      // Show Success Toast
+      showNotify(`${res.name} 充值 ${res.amount} 元成功!`, 'success')
 
-        // Optionally refresh data to show new balance
-        refreshAll()
+      // Optionally refresh data to show new balance
+      refreshAll()
     }
 
     const offs = [
@@ -890,6 +982,11 @@ export default function App() {
                           <td className="px-3 py-2.5 font-mono text-base text-zinc-800 text-center whitespace-nowrap">
                             ¥{row.GMV}
                           </td>
+
+                          <td className="px-3 py-2.5 font-mono text-base text-zinc-800 text-center whitespace-nowrap">
+                            {row.订单数}
+                          </td>
+
                           <td className="px-3 py-2.5 font-mono text-base text-zinc-800 text-center whitespace-nowrap">
                             {row.上次花费}
                           </td>
@@ -901,12 +998,19 @@ export default function App() {
                             <Badge color={badge}>{row.消耗}</Badge>
                           </td>
 
-                          <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                          <td
+                            className="px-3 py-2.5 text-center whitespace-nowrap cursor-pointer hover:bg-blue-50 transition-colors relative group/balance"
+                            onDoubleClick={(e) => openRecharge(row, e)}
+                            title="双击进行充值"
+                          >
                             <div
                               className={`flex items-center justify-center gap-1 font-mono text-base font-bold ${isLowBalance ? 'text-rose-600' : 'text-zinc-900'}`}
                             >
                               {isLowBalance && <AlertCircle size={14} strokeWidth={2.5} />}
                               <span>{row.余额 ? `¥${row.余额}` : '--'}</span>
+                            </div>
+                            <div className="absolute top-1 right-2 p-1 opacity-0 group-hover/balance:opacity-100 transition-opacity pointer-events-none">
+                              <CreditCard size={12} className="text-blue-400/70" />
                             </div>
                           </td>
 
@@ -925,6 +1029,14 @@ export default function App() {
                                 placeholder={row.roi}
                                 value={row.editRoi || ''}
                                 onChange={(e) => handleEditRoiChange(row.UID, e.target.value)}
+                                // --- 添加回车修改功能 ---
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    submitRoi(row, e)
+                                    e.target.blur() // 修改后失去焦点
+                                  }
+                                }}
+                                // -----------------------
                                 min={0}
                                 max={100}
                                 wheelMin={1}
@@ -934,19 +1046,11 @@ export default function App() {
                                 size="sm"
                                 className="!px-2 !text-base shadow-sm"
                                 onClick={(e) => submitRoi(row, e)}
+                                // --- 空值禁用修改 ---
+                                disabled={!row.editRoi || !String(row.editRoi).trim()}
+                                // ------------------
                               >
                                 改
-                              </Button>
-
-                              {/* Recharge Button */}
-                              <Button
-                                size="xs"
-                                color="default"
-                                className="!px-2 ml-1 !bg-white border border-zinc-200 text-zinc-500 hover:text-blue-600 hover:border-blue-200"
-                                onClick={(e) => openRecharge(row, e)}
-                                title="充值"
-                              >
-                                <CreditCard size={14} />
                               </Button>
                             </div>
                           </td>
@@ -955,7 +1059,7 @@ export default function App() {
                     })}
                     {sortedData.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="p-16 text-center text-zinc-400 text-base">
+                        <td colSpan={10} className="p-16 text-center text-zinc-400 text-base">
                           <div className="flex flex-col items-center gap-3">
                             <div className="p-4 bg-zinc-50 rounded-full">
                               <Search size={32} className="opacity-20" />
