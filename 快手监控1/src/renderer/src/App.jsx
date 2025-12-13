@@ -941,7 +941,7 @@ export default function App() {
             onClick={() => setActiveTab('monitor')}
             className={`flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all text-base font-medium ${activeTab === 'monitor' ? 'bg-blue-50 text-blue-600 shadow-sm' : 'text-zinc-500 hover:bg-zinc-50'}`}
           >
-            <Activity size={20} /> <span>核心监控</span>
+            <Activity size={20} /> <span>全站直播监控</span>
           </button>
           <button
             onClick={() => setActiveTab('analysis')}
@@ -1144,33 +1144,38 @@ export default function App() {
                           </td>
 
                           <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                            <div className="flex items-center justify-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
-                              <Input
-                                size="sm"
-                                className="w-20 text-center font-mono !text-base bg-white shadow-sm"
-                                placeholder={row.roi}
-                                value={row.editRoi || ''}
-                                onChange={(e) => handleEditRoiChange(row.UID, e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    submitRoi(row, e)
-                                    e.target.blur()
-                                  }
-                                }}
-                                min={0}
-                                max={100}
-                                wheelMin={1}
-                                wheelMax={100}
-                              />
-                              <Button
-                                size="sm"
-                                className="!px-2 !text-base shadow-sm"
-                                onClick={(e) => submitRoi(row, e)}
-                                disabled={!row.editRoi || !String(row.editRoi).trim()}
-                              >
-                                改
-                              </Button>
-                            </div>
+                            {/* 新增判断：如果 roi 为 0，显示 '智能'，否则显示编辑框 */}
+                            {parseFloat(row.roi) === 0 ? (
+                              <span className="text-zinc-500 font-bold text-sm">智能</span>
+                            ) : (
+                              <div className="flex items-center justify-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                                <Input
+                                  size="sm"
+                                  className="w-20 text-center font-mono !text-base bg-white shadow-sm"
+                                  placeholder={row.roi}
+                                  value={row.editRoi || ''}
+                                  onChange={(e) => handleEditRoiChange(row.UID, e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      submitRoi(row, e)
+                                      e.target.blur()
+                                    }
+                                  }}
+                                  min={0}
+                                  max={100}
+                                  wheelMin={1}
+                                  wheelMax={100}
+                                />
+                                <Button
+                                  size="sm"
+                                  className="!px-3 !text-base shadow-sm"
+                                  onClick={(e) => submitRoi(row, e)}
+                                  disabled={!row.editRoi || !String(row.editRoi).trim()}
+                                >
+                                  改
+                                </Button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       )
