@@ -120,7 +120,7 @@ export class AutoRoiService {
       if (!roiItem || !roiItem.target_id) continue
 
       const currentRoi = parseFloat(roiItem.roi)
-      
+
       // === 新增过滤逻辑 ===
       // 如果 ROI 为 0，说明是智能投放（Intelligent Hosting），则跳过自动调节
       if (currentRoi === 0) {
@@ -142,7 +142,7 @@ export class AutoRoiService {
       let newRoi = currentRoi
       let shouldModify = false
 
-      // === 优先处理连续 0 消耗的特殊逻辑 (次数 >= 2) ===
+      // === [优先级最高] 优先处理连续 0 消耗的特殊逻辑 (次数 >= 2) ===
       if (zeroCount >= 2) {
         let decrease = 0
         if (zeroCount === 2) decrease = 5        // 连续2次
@@ -157,28 +157,31 @@ export class AutoRoiService {
           if (newRoi < MIN_ROI) newRoi = MIN_ROI
           shouldModify = true
         }
-        // 修改：删除了 else if (currentRoi < MIN_ROI) 分支
-        // 如果原本已经低于 2.66，则不再强制调回 2.66，保持现状
       }
-      // === 常规逻辑 (包含第一次 0 消耗的情况) ===
+      // === [优先级次之] 常规逻辑 (包含第一次 0 消耗的情况) ===
+      // 注意：只有当 zeroCount < 2 (即非连续0消耗) 时才会进入此分支
       else {
-        // 1. Cost <= 0.2 (第一次 0 消耗会落入这里，执行 -2)
+        // 1. Cost <= 0.2 (第一次 0 消耗会落入这里)
         if (cost >= 0 && cost <= 0.2) {
           if (currentRoi > MIN_ROI) {
-            newRoi = currentRoi - 2
+            // 新规则：若当前 ROI > 15，则降价 4.0；否则降价 2.0
+            const decrease = currentRoi > 15 ? 4 : 2
+            newRoi = currentRoi - decrease
+
             if (newRoi < MIN_ROI) newRoi = MIN_ROI
             shouldModify = true
           }
-          // 修改：删除了 else if (currentRoi < MIN_ROI) 分支
         }
         // 2. 0.2 < Cost < 0.3
         else if (cost > 0.2 && cost < 0.3) {
           if (currentRoi > MIN_ROI) {
-            newRoi = currentRoi - 1
+            // 新规则：若当前 ROI > 15，则降价 4.0；否则降价 1.0
+            const decrease = currentRoi > 15 ? 4 : 1
+            newRoi = currentRoi - decrease
+
             if (newRoi < MIN_ROI) newRoi = MIN_ROI
             shouldModify = true
           }
-          // 修改：删除了 else if (currentRoi < MIN_ROI) 分支
         }
         // 3. 0.3 <= Cost <= 0.5 -> No Change
         else if (cost >= 0.3 && cost <= 0.5) {

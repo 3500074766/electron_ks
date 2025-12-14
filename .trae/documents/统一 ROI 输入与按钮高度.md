@@ -1,4 +1,0 @@
-- 将 ROI 输入框设置为 Element Plus 的 small 尺寸，与“修改”按钮保持一致高度。
-- 不改宽度与其它交互逻辑，仅增加 `size="small"`。
-- 文件：`src/renderer/src/components/DataTable.vue` 模板中 ROI 输入处。
-- 验证：输入框与按钮高度一致，行内对齐保持居中。
