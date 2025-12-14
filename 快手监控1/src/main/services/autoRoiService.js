@@ -120,6 +120,14 @@ export class AutoRoiService {
       if (!roiItem || !roiItem.target_id) continue
 
       const currentRoi = parseFloat(roiItem.roi)
+      
+      // === 新增过滤逻辑 ===
+      // 如果 ROI 为 0，说明是智能投放（Intelligent Hosting），则跳过自动调节
+      if (currentRoi === 0) {
+        // console.log(`[AutoRoi] Skipping ${item.名称} (Smart Hosting, ROI=0)`)
+        continue
+      }
+
       if (isNaN(currentRoi)) continue
 
       // --- 连续 0 消耗计数逻辑 ---
@@ -142,7 +150,7 @@ export class AutoRoiService {
         else if (zeroCount === 4) decrease = 20   // 连续4次及以上
         else if (zeroCount === 5) decrease = 30   // 连续5次及以上
         else if (zeroCount >= 6) decrease = 40   // 连续6次及以上
-        
+
         // 计算新 ROI (带兜底 MIN_ROI)
         if (currentRoi > MIN_ROI) {
           newRoi = currentRoi - decrease
