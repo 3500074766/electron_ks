@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react'
-import { Settings, Activity, CheckCircle, XCircle, FileText, Power } from 'lucide-react'
+import {
+  Settings,
+  FileText,
+  CheckCircle,
+  XCircle,
+  ChevronDown,
+  ChevronRight,
+  Clock
+} from 'lucide-react'
 
 const Badge = ({ status }) => {
   if (status === 'success') {
@@ -20,6 +28,7 @@ export default function AutoRoiView() {
   const [isEnabled, setIsEnabled] = useState(false)
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(false)
+  const [expandedIds, setExpandedIds] = useState(new Set())
 
   // Fetch initial state
   useEffect(() => {
@@ -41,7 +50,8 @@ export default function AutoRoiView() {
 
     // Listen for realtime logs
     const removeListener = window.api.on('auto_roi_log_update', (newLog) => {
-      setLogs((prev) => [newLog, ...prev].slice(0, 500))
+      // 修改：前端实时更新时也限制只显示最近 10 条
+      setLogs((prev) => [newLog, ...prev].slice(0, 10))
     })
 
     return () => removeListener()
@@ -60,6 +70,16 @@ export default function AutoRoiView() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const toggleExpand = (id) => {
+    const newSet = new Set(expandedIds)
+    if (newSet.has(id)) {
+      newSet.delete(id)
+    } else {
+      newSet.add(id)
+    }
+    setExpandedIds(newSet)
   }
 
   return (
@@ -99,77 +119,115 @@ export default function AutoRoiView() {
         </div>
       </div>
 
-      {/* Logs Table */}
+      {/* Logs List */}
       <div className="flex-1 bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden flex flex-col">
         <div className="px-6 py-4 border-b border-zinc-50 flex items-center justify-between bg-zinc-50/50">
           <div className="flex items-center gap-2 text-zinc-700 font-bold">
             <FileText size={18} className="text-zinc-400" />
-            <span>调节日志</span>
+            <span>调节记录 (保留最近10次)</span>
             <span className="bg-zinc-200 text-zinc-600 text-xs px-2 py-0.5 rounded-full ml-2">
               {logs.length}
             </span>
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto">
-          <table className="w-full text-left border-collapse">
-            <thead className="bg-zinc-50 sticky top-0 z-10">
-              <tr>
-                <th className="px-6 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">
-                  时间
-                </th>
-                <th className="px-6 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">
-                  用户名
-                </th>
-                <th className="px-6 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider text-right">
-                  消耗值
-                </th>
-                <th className="px-6 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider text-center">
-                  ROI 变更
-                </th>
-                <th className="px-6 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider text-right">
-                  状态
-                </th>
-                <th className="px-6 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">
-                  备注
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-50">
-              {logs.length === 0 ? (
-                <tr>
-                  <td colSpan="6" className="px-6 py-12 text-center text-zinc-400">
-                    暂无调节记录
-                  </td>
-                </tr>
-              ) : (
-                logs.map((log, index) => (
-                  <tr key={index} className="hover:bg-blue-50/30 transition-colors">
-                    <td className="px-6 py-3.5 text-sm text-zinc-600 font-mono whitespace-nowrap">
-                      {log.time}
-                    </td>
-                    <td className="px-6 py-3.5 text-sm font-medium text-zinc-800">{log.name}</td>
-                    <td className="px-6 py-3.5 text-sm text-zinc-600 font-mono text-right">
-                      {log.cost}
-                    </td>
-                    <td className="px-6 py-3.5 text-sm text-zinc-800 font-mono text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <span className="text-zinc-400">{log.oldRoi}</span>
-                        <span className="text-zinc-300">→</span>
-                        <span className="font-bold text-blue-600">{log.newRoi}</span>
+        <div className="flex-1 overflow-auto p-4 space-y-3 bg-zinc-50/30">
+          {logs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-48 text-zinc-400">
+              <span className="text-sm">暂无调节记录</span>
+            </div>
+          ) : (
+            logs.map((log) => {
+              // 兼容性处理
+              if (!log.details || !Array.isArray(log.details)) return null
+
+              const isExpanded = expandedIds.has(log.id)
+              return (
+                <div
+                  key={log.id}
+                  className="bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm transition-all hover:shadow-md"
+                >
+                  {/* Header Row - Click to Expand */}
+                  <div
+                    onClick={() => toggleExpand(log.id)}
+                    className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-zinc-50 select-none"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div
+                        className={`p-1 rounded-full transition-transform duration-200 ${isExpanded ? 'bg-blue-100 text-blue-600 rotate-180' : 'bg-zinc-100 text-zinc-400'}`}
+                      >
+                        <ChevronDown size={18} />
                       </div>
-                    </td>
-                    <td className="px-6 py-3.5 text-right">
-                      <Badge status={log.status} />
-                    </td>
-                    <td className="px-6 py-3.5 text-xs text-zinc-400 max-w-xs truncate">
-                      {log.message || '-'}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                      <div className="flex flex-col">
+                        <div className="flex items-center gap-2 text-zinc-800 font-bold text-base">
+                          <span>{log.time}</span>
+                          <span className="text-xs font-normal text-zinc-400 bg-zinc-100 px-2 py-0.5 rounded-full">
+                            自动触发
+                          </span>
+                        </div>
+                        <span className="text-xs text-zinc-500 mt-0.5">
+                          共修改 {log.count} 个计划
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-zinc-400">
+                      {!isExpanded && <span className="text-xs">点击展开详情</span>}
+                    </div>
+                  </div>
+
+                  {/* Detail Table - Collapsible */}
+                  {isExpanded && (
+                    <div className="border-t border-zinc-100 bg-zinc-50/30 animate-in slide-in-from-top-2 duration-200">
+                      <table className="w-full text-left border-collapse">
+                        <thead className="bg-zinc-50 border-b border-zinc-100 text-zinc-500">
+                          <tr>
+                            <th className="px-6 py-2 text-xs font-semibold uppercase w-48">
+                              用户名
+                            </th>
+                            <th className="px-6 py-2 text-xs font-semibold uppercase text-right">
+                              消耗值
+                            </th>
+                            <th className="px-6 py-2 text-xs font-semibold uppercase text-center">
+                              ROI 变更
+                            </th>
+                            <th className="px-6 py-2 text-xs font-semibold uppercase text-right">
+                              状态
+                            </th>
+                            <th className="px-6 py-2 text-xs font-semibold uppercase">备注</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-100/50">
+                          {log.details.map((detail, idx) => (
+                            <tr key={idx} className="hover:bg-blue-50/50 transition-colors">
+                              <td className="px-6 py-3 text-sm font-medium text-zinc-800">
+                                {detail.name}
+                              </td>
+                              <td className="px-6 py-3 text-sm text-zinc-600 font-mono text-right">
+                                {detail.cost}
+                              </td>
+                              <td className="px-6 py-3 text-sm text-zinc-800 font-mono text-center">
+                                <div className="flex items-center justify-center gap-2">
+                                  <span className="text-zinc-400">{detail.oldRoi}</span>
+                                  <span className="text-zinc-300">→</span>
+                                  <span className="font-bold text-blue-600">{detail.newRoi}</span>
+                                </div>
+                              </td>
+                              <td className="px-6 py-3 text-right">
+                                <Badge status={detail.status} />
+                              </td>
+                              <td className="px-6 py-3 text-xs text-zinc-400">
+                                {detail.message || '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          )}
         </div>
       </div>
     </div>

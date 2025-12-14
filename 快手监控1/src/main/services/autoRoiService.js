@@ -18,7 +18,7 @@ export class AutoRoiService {
     this.configPath = join(this.userDataPath, CONFIG_FILE)
     this.logPath = join(this.userDataPath, LOG_FILE)
 
-    this.isEnabled = false
+    this.isEnabled = false // 默认初始化为关闭
     this.logs = []
 
     // 用于记录每个 UID 连续消耗为 0 的次数
@@ -32,7 +32,8 @@ export class AutoRoiService {
     try {
       if (fs.existsSync(this.configPath)) {
         const data = JSON.parse(fs.readFileSync(this.configPath, 'utf-8'))
-        this.isEnabled = !!data.enabled
+        // 强制默认关闭，不记忆上次状态
+        this.isEnabled = false
       }
     } catch (e) {
       console.error('Failed to load auto roi config', e)
@@ -55,8 +56,8 @@ export class AutoRoiService {
 
   _saveLogs() {
     try {
-      // Limit logs to last 500 to prevent file bloat
-      if (this.logs.length > 500) this.logs = this.logs.slice(0, 500)
+      // 限制日志只存储最近 10 次
+      if (this.logs.length > 10) this.logs = this.logs.slice(0, 10)
       fs.writeFileSync(this.logPath, JSON.stringify(this.logs, null, 2), 'utf-8')
     } catch (e) { console.error('Failed to save logs', e) }
   }
@@ -102,6 +103,8 @@ export class AutoRoiService {
     if (!Array.isArray(ksData)) return false
 
     let anyUpdates = false
+    // Collection for this batch of updates
+    const batchDetails = []
 
     for (const item of ksData) {
       const uid = String(item.UID)
@@ -143,14 +146,9 @@ export class AutoRoiService {
           newRoi = currentRoi - decrease
           if (newRoi < MIN_ROI) newRoi = MIN_ROI
           shouldModify = true
-        } else if (currentRoi < MIN_ROI) {
-          newRoi = MIN_ROI
-          shouldModify = true
         }
-
-        if (shouldModify) {
-          console.log(`[AutoRoi] Zero cost streak ${zeroCount} for ${item.名称}, decreasing by ${decrease}`)
-        }
+        // 修改：删除了 else if (currentRoi < MIN_ROI) 分支
+        // 如果原本已经低于 2.66，则不再强制调回 2.66，保持现状
       }
       // === 常规逻辑 (包含第一次 0 消耗的情况) ===
       else {
@@ -160,10 +158,8 @@ export class AutoRoiService {
             newRoi = currentRoi - 2
             if (newRoi < MIN_ROI) newRoi = MIN_ROI
             shouldModify = true
-          } else if (currentRoi < MIN_ROI) {
-            newRoi = MIN_ROI
-            shouldModify = true
           }
+          // 修改：删除了 else if (currentRoi < MIN_ROI) 分支
         }
         // 2. 0.2 < Cost < 0.3
         else if (cost > 0.2 && cost < 0.3) {
@@ -171,10 +167,8 @@ export class AutoRoiService {
             newRoi = currentRoi - 1
             if (newRoi < MIN_ROI) newRoi = MIN_ROI
             shouldModify = true
-          } else if (currentRoi < MIN_ROI) {
-            newRoi = MIN_ROI
-            shouldModify = true
           }
+          // 修改：删除了 else if (currentRoi < MIN_ROI) 分支
         }
         // 3. 0.3 <= Cost <= 0.5 -> No Change
         else if (cost >= 0.3 && cost <= 0.5) {
@@ -238,9 +232,8 @@ export class AutoRoiService {
             async (id) => this.usersSvc.getUserByUid(id)
           )
 
-          // Log success
-          this.addLog({
-            time: new Date().toLocaleString('zh-CN', { hour12: false }),
+          // Add to batch details (success)
+          batchDetails.push({
             name: item.名称,
             cost: cost,
             oldRoi: currentRoi,
@@ -253,9 +246,8 @@ export class AutoRoiService {
 
         } catch (error) {
           console.error(`[AutoRoi] Failed to update ${item.名称}`, error)
-          // Log failure
-          this.addLog({
-            time: new Date().toLocaleString('zh-CN', { hour12: false }),
+          // Add to batch details (failed)
+          batchDetails.push({
             name: item.名称,
             cost: cost,
             oldRoi: currentRoi,
@@ -265,6 +257,17 @@ export class AutoRoiService {
           })
         }
       }
+    }
+
+    // If there are any logs in this batch, save them as a single entry
+    if (batchDetails.length > 0) {
+      const batchLog = {
+        id: Date.now(), // Unique ID for key
+        time: new Date().toLocaleString('zh-CN', { hour12: false }),
+        count: batchDetails.length,
+        details: batchDetails
+      }
+      this.addLog(batchLog)
     }
 
     return anyUpdates
