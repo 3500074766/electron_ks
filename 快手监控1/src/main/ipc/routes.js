@@ -5,7 +5,8 @@ import { RoiService } from '../services/roiService.js'
 import { CountdownService } from '../services/countdownService.js'
 import { WalletService } from '../services/walletService.js'
 import { RechargeService } from '../services/rechargeService.js'
-import { PlanService } from '../services/planService.js' // Import
+import { PlanService } from '../services/planService.js'
+import { AutoRoiService } from '../services/autoRoiService.js' // Import
 
 export function registerIPC(mainWindow) {
   const send = (channel, payload) => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.webContents.send(channel, payload) } }
@@ -15,14 +16,20 @@ export function registerIPC(mainWindow) {
   const roiSvc = new RoiService()
   const walletSvc = new WalletService()
   const rechargeSvc = new RechargeService(mainWindow)
-  const planSvc = new PlanService() // Instantiate
+  const planSvc = new PlanService()
 
-  const cdSvc = new CountdownService({ usersSvc, ksSvc, roiSvc, walletSvc, send })
+  // Instantiate AutoRoiService
+  const autoRoiSvc = new AutoRoiService({ roiSvc, usersSvc, send })
+
+  // Inject into CountdownService
+  const cdSvc = new CountdownService({ usersSvc, ksSvc, roiSvc, walletSvc, autoRoiSvc, send })
 
   mainWindow.webContents.on('did-finish-load', () => {
     send('connection_established', { type: 'connection_established', status: 'success' })
     cdSvc.start()
   })
+
+  // ... (Existing Routes: get_all_kuaishou_data, get_all_roi_data, get_all_wallet_data, refresh_data, update_interval) ...
 
   ipcMain.handle('get_all_kuaishou_data', async () => {
     try {
@@ -70,15 +77,12 @@ export function registerIPC(mainWindow) {
     try {
       const users = await usersSvc.getAllUsers(false)
       send('users_data', { type: 'users_data', status: 'success', data: users })
-
       const [rois, wallets] = await Promise.all([
         roiSvc.getAllRoiData(users),
         walletSvc.getAllWalletData(users)
       ])
-
       send('roi_data', { type: 'roi_data', status: 'success', data: rois, trigger: 'manual' })
       send('wallet_data', { type: 'wallet_data', status: 'success', data: wallets, trigger: 'manual' })
-
       return { type: 'refresh_data', status: 'success' }
     } catch (e) {
       const err = { type: 'error', status: 'error', code: 500, message: String(e?.message || e) }
@@ -126,38 +130,37 @@ export function registerIPC(mainWindow) {
       const { uid, amount } = payload
       const user = await usersSvc.getUserByUid(uid)
       if (!user) throw new Error('用户不存在')
-
       const result = await rechargeSvc.initiateRecharge(user, amount)
-
-      return {
-        status: 'success',
-        data: result
-      }
+      return { status: 'success', data: result }
     } catch (e) {
-      return {
-        status: 'error',
-        message: e.message || '充值发起失败'
-      }
+      return { status: 'error', message: e.message || '充值发起失败' }
     }
   })
 
-  // === New Plan Record Route ===
   ipcMain.handle('get_plan_records', async (_event, payload) => {
     try {
       const { uid, target_id } = payload
       const user = await usersSvc.getUserByUid(uid)
       if (!user) throw new Error('用户不存在')
-
       const records = await planSvc.fetchPlanModifyRecords(user, target_id)
-      return {
-        status: 'success',
-        data: records
-      }
+      return { status: 'success', data: records }
     } catch (e) {
-      return {
-        status: 'error',
-        message: e.message || '获取记录失败'
-      }
+      return { status: 'error', message: e.message || '获取记录失败' }
     }
+  })
+
+  // === New Auto ROI Routes ===
+
+  ipcMain.handle('get_auto_roi_status', async () => {
+    return { status: 'success', data: autoRoiSvc.getStatus() }
+  })
+
+  ipcMain.handle('toggle_auto_roi', async (_event, enabled) => {
+    const newState = autoRoiSvc.toggle(enabled)
+    return { status: 'success', data: { enabled: newState } }
+  })
+
+  ipcMain.handle('get_auto_roi_logs', async () => {
+    return { status: 'success', data: autoRoiSvc.getLogs() }
   })
 }

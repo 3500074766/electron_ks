@@ -19,9 +19,12 @@ const api = {
   resumeCountdown: () => ipcRenderer.invoke('resume_countdown'),
   resetRoiCountdown: () => ipcRenderer.invoke('reset_roi_countdown'),
   createRecharge: (uid, amount) => ipcRenderer.invoke('create_recharge', { uid, amount }),
-
-  // 新增获取计划修改记录 API
   getPlanRecords: (uid, target_id) => ipcRenderer.invoke('get_plan_records', { uid, target_id }),
+
+  // New Auto ROI APIs
+  getAutoRoiStatus: () => ipcRenderer.invoke('get_auto_roi_status'),
+  toggleAutoRoi: (enabled) => ipcRenderer.invoke('toggle_auto_roi', enabled),
+  getAutoRoiLogs: () => ipcRenderer.invoke('get_auto_roi_logs'),
 }
 
 if (process.contextIsolated) {
