@@ -130,6 +130,25 @@ export class CountdownService {
     })
   }
 
+  // Helper to refresh only ROI and Wallet
+  async _refreshRoiAndWallet() {
+    try {
+      console.log('[Countdown] Refreshing ROI and Wallet after modifications...')
+      const users = await this.usersSvc.getAllUsers(false)
+      const [rois, wallets] = await Promise.all([
+        this.roiSvc.getAllRoiData(users),
+        this.walletSvc ? this.walletSvc.getAllWalletData(users) : Promise.resolve([])
+      ])
+
+      this.send('roi_data', { type: 'roi_data', status: 'success', data: rois, trigger: 'auto_refresh' })
+      if (this.walletSvc) {
+        this.send('wallet_data', { type: 'wallet_data', status: 'success', data: wallets, trigger: 'auto_refresh' })
+      }
+    } catch (e) {
+      console.error('[Countdown] Failed to refresh ROI/Wallet:', e)
+    }
+  }
+
   async _tick(force = false) {
     const now = Date.now()
     const triggered = []
@@ -180,9 +199,13 @@ export class CountdownService {
 
         // --- Trigger Auto ROI Adjustment if we have valid data ---
         if (this.autoRoiSvc && fetchedKsData.length > 0 && fetchedRoiData.length > 0) {
-          // Run asynchronously without blocking the countdown reset too much,
-          // but logging will happen inside the service
-          this.autoRoiSvc.checkAndAdjust(fetchedKsData, fetchedRoiData)
+          // Await the adjustment completion and check if any updates occurred
+          const hasUpdates = await this.autoRoiSvc.checkAndAdjust(fetchedKsData, fetchedRoiData)
+
+          if (hasUpdates) {
+            // If updates happened, fetch fresh ROI and Wallet data (bulk)
+            await this._refreshRoiAndWallet()
+          }
         }
 
       } catch (e) {

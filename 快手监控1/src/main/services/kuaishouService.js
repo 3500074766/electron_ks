@@ -21,7 +21,7 @@ export class KuaishouService {
       endTime: nowMs,
       viewType: 1,
       groupType: 2,
-      selectors: [ { name: 'promotionType', values: [1] }, { name: 'sceneOrientedType', values: [21] } ],
+      selectors: [{ name: 'promotionType', values: [1] }, { name: 'sceneOrientedType', values: [21] }],
       searchAd: false
     }
     const headers = { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', cookie: ck }
@@ -54,7 +54,7 @@ export class KuaishouService {
       const dn = typeof r?.data === 'object' && r?.data?.data ? r.data.data : r?.data
       if (!dn || !Array.isArray(dn?.overview)) break
       const o = dn.overview
-      ;({ gmv, orders, spend, globalRoi } = this._pickItems(o))
+        ; ({ gmv, orders, spend, globalRoi } = this._pickItems(o))
       retry++
       await new Promise(rs => setTimeout(rs, 1000))
     }
@@ -68,7 +68,15 @@ export class KuaishouService {
     const currentGlobalRoi = Math.round(globalRoiValue * 100) / 100
     const lastSpendValue = this.repo.getLastSpend(user.UID)
     const lastSpend = Math.round((lastSpendValue / 1000) * 100) / 100
-    const changeValue = lastSpendValue > 0 ? Math.round(((spendValue / 1000 - lastSpendValue / 1000)) * 100) / 100 : '--'
+
+    // 修改处：将 const 改为 let，并添加负数修正逻辑
+    let changeValue = lastSpendValue > 0 ? Math.round(((spendValue / 1000 - lastSpendValue / 1000)) * 100) / 100 : '--'
+
+    // 逻辑：如果计算出的消耗为负数（说明发生了0点重置），则使用当前累计花费作为消耗值
+    if (typeof changeValue === 'number' && changeValue < 0) {
+      changeValue = currentSpend
+    }
+
     const itemsToSave = overview.map(it => ({ name: it?.name || '', value: it?.value || 0, unit: it?.unit || '' }))
     this.repo.save(user.UID, itemsToSave)
     const timeStr = new Date().toLocaleTimeString()
