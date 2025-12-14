@@ -139,8 +139,10 @@ export class AutoRoiService {
         let decrease = 0
         if (zeroCount === 2) decrease = 5        // 连续2次
         else if (zeroCount === 3) decrease = 10  // 连续3次
-        else if (zeroCount >= 4) decrease = 20   // 连续4次及以上
-
+        else if (zeroCount === 4) decrease = 20   // 连续4次及以上
+        else if (zeroCount === 5) decrease = 30   // 连续5次及以上
+        else if (zeroCount >= 6) decrease = 40   // 连续6次及以上
+        
         // 计算新 ROI (带兜底 MIN_ROI)
         if (currentRoi > MIN_ROI) {
           newRoi = currentRoi - decrease

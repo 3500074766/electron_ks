@@ -1,5 +1,7 @@
+//
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
+import logoImg from './assets/kuaishou-monitor.png'
 import {
   Activity,
   TrendingUp,
@@ -16,9 +18,10 @@ import {
 
 // 引入组件
 import MonitorView from './components/MonitorView'
-import AutoRoiView from './components/AutoRoiView' // Use new component
+import AutoRoiView from './components/AutoRoiView'
 
-// --- 1. UI 组件 (保留定义) ---
+// --- 1. UI 组件 ---
+
 const Button = ({
   children,
   variant = 'solid',
@@ -54,6 +57,152 @@ const Button = ({
       {loading && <RefreshCw className="w-4 h-4 mr-2 animate-spin" />}
       {children}
     </button>
+  )
+}
+
+// 恢复 Input 组件 (包含滚轮支持)
+const Input = ({
+  value,
+  onChange,
+  onBlur,
+  onKeyDown,
+  placeholder,
+  className = '',
+  size = 'md',
+  onClick,
+  min = -Infinity,
+  max = Infinity,
+  wheelMin = -Infinity,
+  wheelMax = Infinity,
+  step = null,
+  integerOnly = false
+}) => {
+  const inputRef = useRef(null)
+  const sizeClass = size === 'sm' ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm'
+
+  const latestProps = useRef({
+    value,
+    onChange,
+    placeholder,
+    min,
+    max,
+    wheelMin,
+    wheelMax,
+    step,
+    integerOnly
+  })
+
+  useEffect(() => {
+    latestProps.current = {
+      value,
+      onChange,
+      placeholder,
+      min,
+      max,
+      wheelMin,
+      wheelMax,
+      step,
+      integerOnly
+    }
+  }, [value, onChange, placeholder, min, max, wheelMin, wheelMax, step, integerOnly])
+
+  const handleInputChange = (e) => {
+    const val = e.target.value
+    if (val === '') {
+      onChange(e)
+      return
+    }
+
+    if (integerOnly) {
+      if (!/^\d*$/.test(val)) return
+    } else {
+      if (!/^\d*\.?\d*$/.test(val)) return
+    }
+
+    const numVal = parseFloat(val)
+    if (!isNaN(numVal)) {
+      if (numVal > max) return
+    }
+
+    onChange(e)
+  }
+
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+
+    const handleWheelNative = (e) => {
+      if (document.activeElement === el) {
+        e.preventDefault()
+
+        const {
+          value: currValue,
+          onChange: currOnChange,
+          placeholder: currPlaceholder,
+          wheelMin,
+          wheelMax,
+          min,
+          max,
+          step
+        } = latestProps.current
+
+        const isUp = e.deltaY < 0
+
+        let baseValue = currValue
+        if (baseValue === '' || baseValue === null || baseValue === undefined) {
+          baseValue = currPlaceholder || (min !== -Infinity ? String(min) : '0')
+        }
+
+        let numVal = parseFloat(baseValue)
+        if (isNaN(numVal)) numVal = 0
+
+        let newValue
+
+        if (step && step > 0) {
+          if (isUp) {
+            newValue = (Math.floor(numVal / step) + 1) * step
+          } else {
+            newValue = (Math.ceil(numVal / step) - 1) * step
+          }
+        } else {
+          const delta = isUp ? 1 : -1
+          newValue = Math.round((numVal + delta) * 100) / 100
+        }
+
+        const effectiveMin = wheelMin !== -Infinity ? wheelMin : min
+        const effectiveMax = wheelMax !== -Infinity ? wheelMax : max
+
+        if (effectiveMin !== -Infinity && newValue < effectiveMin) newValue = effectiveMin
+        if (effectiveMax !== -Infinity && newValue > effectiveMax) newValue = effectiveMax
+
+        if (currOnChange) {
+          currOnChange({ target: { value: String(newValue) } })
+        }
+      }
+    }
+
+    el.addEventListener('wheel', handleWheelNative, { passive: false })
+    return () => {
+      el.removeEventListener('wheel', handleWheelNative)
+    }
+  }, [])
+
+  return (
+    <div
+      className={`flex items-center bg-white rounded-lg border border-zinc-300 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 transition-all ${sizeClass} ${className}`}
+      onClick={onClick}
+    >
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={handleInputChange}
+        onBlur={onBlur}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        className="w-full bg-transparent outline-none text-zinc-900 placeholder-zinc-400 select-text"
+      />
+    </div>
   )
 }
 
@@ -159,15 +308,17 @@ const RechargeModal = ({ isOpen, onClose, data }) => {
                 <label className="block text-sm font-medium text-zinc-500 mb-2">
                   充值金额 (元)
                 </label>
-                <div className="flex items-center bg-white rounded-lg border border-zinc-300 px-3 py-2 text-sm">
-                  <input
-                    type="text"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    className="w-full bg-transparent outline-none text-zinc-900 !text-xl font-bold text-center !py-3"
-                    placeholder="请输入金额"
-                  />
-                </div>
+                {/* 恢复使用 Input 组件 */}
+                <Input
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="!text-xl font-bold text-center !py-3"
+                  placeholder="请输入金额"
+                  min={1}
+                  max={500000}
+                  step={10}
+                  integerOnly={true}
+                />
                 {error && <p className="text-rose-500 text-xs mt-2 text-center">{error}</p>}
               </div>
               <Button
@@ -623,12 +774,13 @@ export default function App() {
         onClose={() => setHistoryModal({ isOpen: false, data: null })}
       />
 
-      <div className="w-50 bg-white border-r border-zinc-100 flex flex-col z-10 shadow-sm">
+      <div className="w-55 bg-white border-r border-zinc-100 flex flex-col z-10 shadow-sm">
         <div className="h-20 flex items-center px-6 border-b border-zinc-50 gap-3">
-          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-blue-200 shadow-md">
-            KS
+          {/* logo */}
+          <div className="w-10 h-10 rounded-xl overflow-hidden">
+            <img src={logoImg} alt="Logo" className="w-full h-full object-cover" />
           </div>
-          <span className="text-xl font-bold text-zinc-800 tracking-tight">数据助手</span>
+          <span className="text-xl font-bold text-zinc-800 tracking-tight">快手监控助手</span>
         </div>
         <div className="p-4 flex flex-col gap-2">
           <button
