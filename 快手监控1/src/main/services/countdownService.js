@@ -3,12 +3,13 @@ import fs from 'fs'
 import { join } from 'path'
 
 export class CountdownService {
-  constructor({ usersSvc, ksSvc, roiSvc, walletSvc, autoRoiSvc, send }) {
+  constructor({ usersSvc, ksSvc, roiSvc, walletSvc, autoRoiSvc, notifySvc, send }) {
     this.usersSvc = usersSvc
     this.ksSvc = ksSvc
     this.roiSvc = roiSvc
     this.walletSvc = walletSvc
-    this.autoRoiSvc = autoRoiSvc // Injected AutoRoiService
+    this.autoRoiSvc = autoRoiSvc
+    this.notifySvc = notifySvc // 注入通知服务
     this.send = send
 
     // 默认 10 分钟
@@ -89,7 +90,6 @@ export class CountdownService {
       this.send('users_data', { type: 'users_data', status: 'success', data: users })
 
       if (Array.isArray(users) && users.length > 0) {
-        // Cold start doesn't trigger Auto ROI adjust
         const p1 = this.ksSvc.getAllKuaishouData(users).then(ks =>
           this.send('kuaishou_data', { type: 'kuaishou_data', status: 'success', data: ks, trigger: 'auto' })
         )
@@ -130,7 +130,6 @@ export class CountdownService {
     })
   }
 
-  // Helper to refresh only ROI and Wallet
   async _refreshRoiAndWallet() {
     try {
       console.log('[Countdown] Refreshing ROI and Wallet after modifications...')
@@ -156,20 +155,22 @@ export class CountdownService {
     if ((force || now >= this.nextRefreshAt) && !this.isUpdating) {
       this.isUpdating = true
       try {
+        // 定义变量用于存储此次请求的结果，供后续逻辑使用
         let fetchedKsData = []
         let fetchedRoiData = []
+        let fetchedWalletData = []
 
         const updateTask = async () => {
           const users = await this.usersSvc.getAllUsers(false)
 
-          // Execute fetches
+          // 执行并发请求
           const [ksResult, roiResult, walletResult] = await Promise.allSettled([
             this.ksSvc.getAllKuaishouData(users),
             this.roiSvc.getAllRoiData(users),
             this.walletSvc ? this.walletSvc.getAllWalletData(users) : Promise.resolve([])
           ])
 
-          // Handle KS Data
+          // 处理快手数据
           if (ksResult.status === 'fulfilled') {
             fetchedKsData = ksResult.value
             this.send('kuaishou_data', { type: 'kuaishou_data', status: 'success', data: fetchedKsData, trigger: 'auto' })
@@ -177,7 +178,7 @@ export class CountdownService {
             this.send('kuaishou_data', { type: 'kuaishou_data', status: 'error', code: 500, message: String(ksResult.reason) })
           }
 
-          // Handle ROI Data
+          // 处理 ROI 数据
           if (roiResult.status === 'fulfilled') {
             fetchedRoiData = roiResult.value
             this.send('roi_data', { type: 'roi_data', status: 'success', data: fetchedRoiData, trigger: 'auto' })
@@ -185,9 +186,19 @@ export class CountdownService {
             this.send('roi_data', { type: 'roi_data', status: 'error', code: 500, message: String(roiResult.reason) })
           }
 
-          // Handle Wallet Data
+          // 处理钱包数据
           if (walletResult.status === 'fulfilled') {
-            this.send('wallet_data', { type: 'wallet_data', status: 'success', data: walletResult.value, trigger: 'auto' })
+            // 注意：WalletService 返回的数据可能不带 Name，这里手动补全 Name，方便邮件显示
+            fetchedWalletData = walletResult.value.map(w => {
+              const u = users.find(u => String(u.UID) === String(w.UID))
+              // [修改] 注入 ck 字段，以便通知服务使用
+              return {
+                ...w,
+                名称: u ? u.名称 : w.UID,
+                ck: u ? u.ck : ''
+              }
+            })
+            this.send('wallet_data', { type: 'wallet_data', status: 'success', data: fetchedWalletData, trigger: 'auto' })
           }
         }
 
@@ -197,15 +208,24 @@ export class CountdownService {
 
         triggered.push('all')
 
-        // --- Trigger Auto ROI Adjustment if we have valid data ---
+        // 1. 自动 ROI 调节
         if (this.autoRoiSvc && fetchedKsData.length > 0 && fetchedRoiData.length > 0) {
-          // Await the adjustment completion and check if any updates occurred
           const hasUpdates = await this.autoRoiSvc.checkAndAdjust(fetchedKsData, fetchedRoiData)
-
           if (hasUpdates) {
-            // If updates happened, fetch fresh ROI and Wallet data (bulk)
             await this._refreshRoiAndWallet()
           }
+        }
+
+        // 2. [新增] 通用通知检查
+        // 只有在自动轮询且有通知服务时才触发
+        if (this.notifySvc) {
+          const context = {
+            ksData: fetchedKsData, // 包含消耗信息和 ck (KuaishouService 中已包含)
+            wallets: fetchedWalletData, // 包含余额信息和 ck (上面已注入)
+            roiData: fetchedRoiData // 预留
+          }
+          // 异步执行检查，不阻塞主流程
+          this.notifySvc.checkAndNotify(context).catch(err => console.error('[Countdown] Notification check error:', err))
         }
 
       } catch (e) {

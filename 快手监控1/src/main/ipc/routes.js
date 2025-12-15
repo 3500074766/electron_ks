@@ -6,7 +6,8 @@ import { CountdownService } from '../services/countdownService.js'
 import { WalletService } from '../services/walletService.js'
 import { RechargeService } from '../services/rechargeService.js'
 import { PlanService } from '../services/planService.js'
-import { AutoRoiService } from '../services/autoRoiService.js' // Import
+import { AutoRoiService } from '../services/autoRoiService.js'
+import { NotificationService } from '../services/notificationService.js'
 
 export function registerIPC(mainWindow) {
   const send = (channel, payload) => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.webContents.send(channel, payload) } }
@@ -17,19 +18,19 @@ export function registerIPC(mainWindow) {
   const walletSvc = new WalletService()
   const rechargeSvc = new RechargeService(mainWindow)
   const planSvc = new PlanService()
-
-  // Instantiate AutoRoiService
   const autoRoiSvc = new AutoRoiService({ roiSvc, usersSvc, send })
 
-  // Inject into CountdownService
-  const cdSvc = new CountdownService({ usersSvc, ksSvc, roiSvc, walletSvc, autoRoiSvc, send })
+  // [修改] 将 rechargeSvc 注入到 NotificationService
+  const notifySvc = new NotificationService({ rechargeSvc })
+
+  const cdSvc = new CountdownService({ usersSvc, ksSvc, roiSvc, walletSvc, autoRoiSvc, notifySvc, send })
 
   mainWindow.webContents.on('did-finish-load', () => {
     send('connection_established', { type: 'connection_established', status: 'success' })
     cdSvc.start()
   })
 
-  // ... (Existing Routes: get_all_kuaishou_data, get_all_roi_data, get_all_wallet_data, refresh_data, update_interval) ...
+  // ... 现有的路由 ...
 
   ipcMain.handle('get_all_kuaishou_data', async () => {
     try {
@@ -149,8 +150,7 @@ export function registerIPC(mainWindow) {
     }
   })
 
-  // === New Auto ROI Routes ===
-
+  // Auto ROI Routes
   ipcMain.handle('get_auto_roi_status', async () => {
     return { status: 'success', data: autoRoiSvc.getStatus() }
   })
@@ -162,5 +162,15 @@ export function registerIPC(mainWindow) {
 
   ipcMain.handle('get_auto_roi_logs', async () => {
     return { status: 'success', data: autoRoiSvc.getLogs() }
+  })
+
+  // [新增] Notification Routes
+  ipcMain.handle('get_notification_config', async () => {
+    return { status: 'success', data: notifySvc.getConfig() }
+  })
+
+  ipcMain.handle('save_notification_config', async (_event, config) => {
+    const newConfig = notifySvc.updateConfig(config)
+    return { status: 'success', data: newConfig }
   })
 }

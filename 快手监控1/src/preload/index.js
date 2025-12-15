@@ -21,10 +21,14 @@ const api = {
   createRecharge: (uid, amount) => ipcRenderer.invoke('create_recharge', { uid, amount }),
   getPlanRecords: (uid, target_id) => ipcRenderer.invoke('get_plan_records', { uid, target_id }),
 
-  // New Auto ROI APIs
+  // Auto ROI APIs
   getAutoRoiStatus: () => ipcRenderer.invoke('get_auto_roi_status'),
   toggleAutoRoi: (enabled) => ipcRenderer.invoke('toggle_auto_roi', enabled),
   getAutoRoiLogs: () => ipcRenderer.invoke('get_auto_roi_logs'),
+
+  // [新增] Notification APIs
+  getNotificationConfig: () => ipcRenderer.invoke('get_notification_config'),
+  saveNotificationConfig: (config) => ipcRenderer.invoke('save_notification_config', config),
 }
 
 if (process.contextIsolated) {

@@ -1,4 +1,3 @@
-//
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
 import logoImg from './assets/kuaishou-monitor.png'
@@ -13,12 +12,14 @@ import {
   CreditCard,
   History,
   Search,
-  Settings
+  Settings,
+  Bell // 引入 Bell 图标
 } from 'lucide-react'
 
 // 引入组件
 import MonitorView from './components/MonitorView'
 import AutoRoiView from './components/AutoRoiView'
+import NotificationView from './components/NotificationView' // 引入新组件
 
 // --- 1. UI 组件 ---
 
@@ -60,7 +61,6 @@ const Button = ({
   )
 }
 
-// 恢复 Input 组件 (包含滚轮支持)
 const Input = ({
   value,
   onChange,
@@ -112,29 +112,19 @@ const Input = ({
       onChange(e)
       return
     }
-
-    if (integerOnly) {
-      if (!/^\d*$/.test(val)) return
-    } else {
-      if (!/^\d*\.?\d*$/.test(val)) return
-    }
-
+    if (integerOnly && !/^\d*$/.test(val)) return
+    if (!integerOnly && !/^\d*\.?\d*$/.test(val)) return
     const numVal = parseFloat(val)
-    if (!isNaN(numVal)) {
-      if (numVal > max) return
-    }
-
+    if (!isNaN(numVal) && numVal > max) return
     onChange(e)
   }
 
   useEffect(() => {
     const el = inputRef.current
     if (!el) return
-
     const handleWheelNative = (e) => {
       if (document.activeElement === el) {
         e.preventDefault()
-
         const {
           value: currValue,
           onChange: currOnChange,
@@ -145,46 +135,30 @@ const Input = ({
           max,
           step
         } = latestProps.current
-
         const isUp = e.deltaY < 0
-
         let baseValue = currValue
-        if (baseValue === '' || baseValue === null || baseValue === undefined) {
+        if (baseValue === '' || baseValue == null)
           baseValue = currPlaceholder || (min !== -Infinity ? String(min) : '0')
-        }
-
         let numVal = parseFloat(baseValue)
         if (isNaN(numVal)) numVal = 0
-
         let newValue
-
         if (step && step > 0) {
-          if (isUp) {
-            newValue = (Math.floor(numVal / step) + 1) * step
-          } else {
-            newValue = (Math.ceil(numVal / step) - 1) * step
-          }
+          newValue = isUp
+            ? (Math.floor(numVal / step) + 1) * step
+            : (Math.ceil(numVal / step) - 1) * step
         } else {
           const delta = isUp ? 1 : -1
           newValue = Math.round((numVal + delta) * 100) / 100
         }
-
         const effectiveMin = wheelMin !== -Infinity ? wheelMin : min
         const effectiveMax = wheelMax !== -Infinity ? wheelMax : max
-
         if (effectiveMin !== -Infinity && newValue < effectiveMin) newValue = effectiveMin
         if (effectiveMax !== -Infinity && newValue > effectiveMax) newValue = effectiveMax
-
-        if (currOnChange) {
-          currOnChange({ target: { value: String(newValue) } })
-        }
+        if (currOnChange) currOnChange({ target: { value: String(newValue) } })
       }
     }
-
     el.addEventListener('wheel', handleWheelNative, { passive: false })
-    return () => {
-      el.removeEventListener('wheel', handleWheelNative)
-    }
+    return () => el.removeEventListener('wheel', handleWheelNative)
   }, [])
 
   return (
@@ -206,7 +180,8 @@ const Input = ({
   )
 }
 
-// --- 2. 弹窗组件 (Modal) ---
+// --- 2. 弹窗组件 ---
+
 const ConfirmModal = ({ isOpen, title, content, onConfirm, onCancel }) => {
   if (!isOpen) return null
   return (
@@ -308,7 +283,6 @@ const RechargeModal = ({ isOpen, onClose, data }) => {
                 <label className="block text-sm font-medium text-zinc-500 mb-2">
                   充值金额 (元)
                 </label>
-                {/* 恢复使用 Input 组件 */}
                 <Input
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
@@ -776,7 +750,6 @@ export default function App() {
 
       <div className="w-55 bg-white border-r border-zinc-100 flex flex-col z-10 shadow-sm">
         <div className="h-20 flex items-center px-6 border-b border-zinc-50 gap-3">
-          {/* logo */}
           <div className="w-10 h-10 rounded-xl overflow-hidden">
             <img src={logoImg} alt="Logo" className="w-full h-full object-cover" />
           </div>
@@ -789,11 +762,20 @@ export default function App() {
           >
             <Activity size={20} /> <span>全站直播监控</span>
           </button>
+
           <button
             onClick={() => setActiveTab('auto_roi')}
             className={`flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all text-base font-medium ${activeTab === 'auto_roi' ? 'bg-blue-50 text-blue-600 shadow-sm' : 'text-zinc-500 hover:bg-zinc-50'}`}
           >
             <Settings size={20} /> <span>自动ROI调节</span>
+          </button>
+
+          {/* 新增：消息通知按钮 */}
+          <button
+            onClick={() => setActiveTab('notification')}
+            className={`flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all text-base font-medium ${activeTab === 'notification' ? 'bg-blue-50 text-blue-600 shadow-sm' : 'text-zinc-500 hover:bg-zinc-50'}`}
+          >
+            <Bell size={20} /> <span>消息通知中心</span>
           </button>
         </div>
       </div>
@@ -829,12 +811,21 @@ export default function App() {
             submitRoi={submitRoi}
           />
         </div>
+
         <div
           className="h-full w-full"
           style={{ display: activeTab === 'auto_roi' ? 'block' : 'none' }}
         >
           <AutoRoiView />
         </div>
+
+        {/* [修改] 消息通知页面改为条件渲染 */}
+        {/* 这样当切换到其他 Tab 时，NotificationView 会被销毁，未保存的状态将重置 */}
+        {activeTab === 'notification' && (
+          <div className="h-full w-full">
+            <NotificationView />
+          </div>
+        )}
       </div>
     </div>
   )
