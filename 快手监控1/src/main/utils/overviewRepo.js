@@ -32,4 +32,14 @@ export class OverviewRepo {
     const spendItem = rec.items.find(i => i && i.name && ['消耗', '花费', 'spend', 'cost'].some(k => i.name.includes(k)))
     return spendItem ? spendItem.value : 0
   }
+
+  // 新增：获取上一次的全站ROI
+  getLastGlobalRoi(uid) {
+    const data = this.readAll()
+    const rec = data[uid]
+    if (!rec || !rec.items) return 0
+    // 查找名为 '全站ROI' 的项
+    const roiItem = rec.items.find(i => i && i.name && ['全站ROI', 'globalRoi'].some(k => i.name.includes(k)))
+    return roiItem ? roiItem.value : 0
+  }
 }

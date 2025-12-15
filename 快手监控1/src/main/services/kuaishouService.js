@@ -64,8 +64,20 @@ export class KuaishouService {
     const currentGmv = Math.round((gmvValue / 1000) * 100) / 100
     const orderCountValue = orders?.value || 0
     const currentOrderCount = Math.trunc(orderCountValue)
+
+    // --- ROI 处理逻辑 ---
     const globalRoiValue = globalRoi?.value || 0
     const currentGlobalRoi = Math.round(globalRoiValue * 100) / 100
+
+    // 获取上一次 ROI (仿照消耗的逻辑)
+    const lastGlobalRoiValue = this.repo.getLastGlobalRoi(user.UID)
+    const lastGlobalRoi = Math.round(lastGlobalRoiValue * 100) / 100
+
+    // 计算 ROI 差值 (本次 - 上次)
+    // 逻辑：如果存在上次记录，则计算差值并保留两位小数；否则显示 '--'
+    let roiChangeValue = lastGlobalRoiValue > 0 ? Math.round((globalRoiValue - lastGlobalRoiValue) * 100) / 100 : '--'
+    // -------------------
+
     const lastSpendValue = this.repo.getLastSpend(user.UID)
     const lastSpend = Math.round((lastSpendValue / 1000) * 100) / 100
 
@@ -90,6 +102,8 @@ export class KuaishouService {
       GMV: currentGmv,
       订单数: currentOrderCount,
       全站ROI: currentGlobalRoi,
+      上次全站ROI: lastGlobalRoi, // 新增：给前端
+      全站ROI差值: roiChangeValue,    // 新增：给前端
       时间: timeStr,
       ck: user.ck
     }

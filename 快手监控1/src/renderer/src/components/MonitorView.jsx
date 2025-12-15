@@ -212,6 +212,11 @@ export default function MonitorView({
   handleEditRoiChange,
   submitRoi
 }) {
+  // 打印列表数据到控制台
+  useEffect(() => {
+    console.log('前端列表动态绑定数据 (sortedData):', sortedData)
+  }, [sortedData])
+
   // 本地格式化时间函数
   const formatTime = (s) => {
     const safeS = parseInt(s, 10)
