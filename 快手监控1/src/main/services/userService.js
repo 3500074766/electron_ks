@@ -46,8 +46,9 @@ export class UserService {
   }
 
   async getAllUsers() {
-    const sql = 'SELECT * FROM Mysqlks WHERE ClName = ?'
-    const rows = await this._fetchAll(sql, ['磁力金牛自助户'])
+    // 修改：去掉了 WHERE ClName = ? 限制，直接查询所有数据
+    const sql = 'SELECT * FROM Mysqlks'
+    const rows = await this._fetchAll(sql, [])
     const users = rows.map(row => {
       const UID = String(row.UID ?? row.uid ?? '')
       const 名称 = row.Name ?? row.name ?? row['名称'] ?? ''
