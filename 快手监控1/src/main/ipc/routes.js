@@ -150,7 +150,7 @@ export function registerIPC(mainWindow) {
     }
   })
 
-  // === Auto ROI Routes ===
+  // Auto ROI Routes
   ipcMain.handle('get_auto_roi_status', async () => {
     return { status: 'success', data: autoRoiSvc.getStatus() }
   })
@@ -160,27 +160,11 @@ export function registerIPC(mainWindow) {
     return { status: 'success', data: { enabled: newState } }
   })
 
-  ipcMain.handle('set_auto_roi_rule', async (_event, ruleId) => {
-    const success = autoRoiSvc.setRule(ruleId)
-    return { status: success ? 'success' : 'error', message: success ? '规则已切换' : '规则不存在' }
-  })
-
   ipcMain.handle('get_auto_roi_logs', async () => {
     return { status: 'success', data: autoRoiSvc.getLogs() }
   })
 
-  ipcMain.handle('export_auto_roi_logs', async () => {
-    try {
-      // 传入 mainWindow 以便显示对话框
-      await autoRoiSvc.exportLogs(mainWindow)
-      return { status: 'success', message: '导出成功' }
-    } catch (e) {
-      if (e.message.includes('cancelled')) return { status: 'cancelled' }
-      return { status: 'error', message: e.message }
-    }
-  })
-
-  // Notification Routes
+  // [新增] Notification Routes
   ipcMain.handle('get_notification_config', async () => {
     return { status: 'success', data: notifySvc.getConfig() }
   })

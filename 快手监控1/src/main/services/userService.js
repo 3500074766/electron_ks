@@ -45,8 +45,7 @@ export class UserService {
     })
   }
 
-  async getAllUsers() {
-    // 修改：去掉了 WHERE ClName = ? 限制，直接查询所有数据
+  async getAllUsers(includeInactive = false) {
     const sql = 'SELECT * FROM Mysqlks'
     const rows = await this._fetchAll(sql, [])
     const users = rows.map(row => {

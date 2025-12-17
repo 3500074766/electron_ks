@@ -3,6 +3,7 @@ import { QRCodeCanvas } from 'qrcode.react'
 import logoImg from './assets/kuaishou-monitor.png'
 import {
   Activity,
+  TrendingUp,
   RefreshCw,
   AlertCircle,
   CheckCircle,
@@ -10,19 +11,15 @@ import {
   AlertTriangle,
   CreditCard,
   History,
+  Search,
   Settings,
-  Bell,
-  ChevronDown,
-  Zap,
-  Sliders,
-  List
+  Bell // 引入 Bell 图标
 } from 'lucide-react'
 
 // 引入组件
 import MonitorView from './components/MonitorView'
-import AutoRoiRulesView from './components/AutoRoiRulesView'
-import AutoRoiLogsView from './components/AutoRoiLogsView'
-import NotificationView from './components/NotificationView'
+import AutoRoiView from './components/AutoRoiView'
+import NotificationView from './components/NotificationView' // 引入新组件
 
 // --- 1. UI 组件 ---
 
@@ -522,39 +519,6 @@ export default function App() {
   const isManualRefresh = useRef(false)
   const isEditingInterval = useRef(false)
 
-  // --- 导航菜单配置 ---
-  const [expandedGroups, setExpandedGroups] = useState(['g_monitor', 'g_strategy'])
-
-  const NAV_CONFIG = [
-    {
-      id: 'g_monitor',
-      title: '监控中心',
-      icon: Activity,
-      items: [{ id: 'monitor', label: '全站直播监控' }]
-    },
-    {
-      id: 'g_strategy',
-      title: '自动ROI调节',
-      icon: Zap,
-      items: [
-        { id: 'auto_roi_rules', label: '策略配置', icon: Sliders },
-        { id: 'auto_roi_logs', label: '运行日志', icon: List }
-      ]
-    },
-    {
-      id: 'g_notify',
-      title: '消息通知',
-      icon: Bell,
-      items: [{ id: 'notification', label: '消息通知中心' }]
-    }
-  ]
-
-  const toggleGroup = (groupId) => {
-    setExpandedGroups((prev) =>
-      prev.includes(groupId) ? prev.filter((id) => id !== groupId) : [...prev, groupId]
-    )
-  }
-
   const formatUrl = (u) => (u ? (u.startsWith('http') ? u : `https://${u}`) : '')
   const showNotify = (msg, type = 'success') => {
     setNotification({ message: msg, type })
@@ -784,89 +748,35 @@ export default function App() {
         onClose={() => setHistoryModal({ isOpen: false, data: null })}
       />
 
-      {/* --- 左侧侧边导航栏 (二级) --- */}
-      <div className="w-64 bg-white border-r border-zinc-100 flex flex-col z-10 shadow-sm shrink-0 transition-all">
-        {/* Logo 区域 */}
+      <div className="w-55 bg-white border-r border-zinc-100 flex flex-col z-10 shadow-sm">
         <div className="h-20 flex items-center px-6 border-b border-zinc-50 gap-3">
-          <div className="w-9 h-9 rounded-xl overflow-hidden bg-zinc-100 p-0.5">
-            <img src={logoImg} alt="Logo" className="w-full h-full object-cover rounded-lg" />
+          <div className="w-10 h-10 rounded-xl overflow-hidden">
+            <img src={logoImg} alt="Logo" className="w-full h-full object-cover" />
           </div>
-          <span className="text-lg font-bold text-zinc-800 tracking-tight">快手监控助手</span>
+          <span className="text-xl font-bold text-zinc-800 tracking-tight">快手监控助手</span>
         </div>
+        <div className="p-4 flex flex-col gap-2">
+          <button
+            onClick={() => setActiveTab('monitor')}
+            className={`flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all text-base font-medium ${activeTab === 'monitor' ? 'bg-blue-50 text-blue-600 shadow-sm' : 'text-zinc-500 hover:bg-zinc-50'}`}
+          >
+            <Activity size={20} /> <span>全站直播监控</span>
+          </button>
 
-        {/* 导航菜单区域 */}
-        <div className="flex-1 overflow-y-auto py-6 px-4 flex flex-col gap-4">
-          {NAV_CONFIG.map((group) => {
-            const isExpanded = expandedGroups.includes(group.id)
-            const isActiveGroup = group.items.some((c) => c.id === activeTab)
+          <button
+            onClick={() => setActiveTab('auto_roi')}
+            className={`flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all text-base font-medium ${activeTab === 'auto_roi' ? 'bg-blue-50 text-blue-600 shadow-sm' : 'text-zinc-500 hover:bg-zinc-50'}`}
+          >
+            <Settings size={20} /> <span>自动ROI调节</span>
+          </button>
 
-            return (
-              <div key={group.id} className="select-none">
-                {/* 一级菜单 (分组标题) */}
-                <button
-                  onClick={() => toggleGroup(group.id)}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 mb-1 text-sm font-bold transition-all rounded-xl group
-                    ${isActiveGroup ? 'text-blue-700 bg-blue-50/40' : 'text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900'}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <group.icon
-                      size={18}
-                      className={
-                        isActiveGroup ? 'text-blue-600' : 'text-zinc-400 group-hover:text-zinc-600'
-                      }
-                    />
-                    <span>{group.title}</span>
-                  </div>
-                  <div
-                    className={`transition-transform duration-200 text-zinc-400 ${isExpanded ? 'rotate-180' : ''}`}
-                  >
-                    <ChevronDown size={16} />
-                  </div>
-                </button>
-
-                {/* 二级菜单 (子项) */}
-                <div
-                  className={`space-y-1 overflow-hidden transition-all duration-300 ease-in-out ${
-                    isExpanded ? 'max-h-96 opacity-100 mt-1' : 'max-h-0 opacity-0'
-                  }`}
-                >
-                  {group.items.map((item) => {
-                    const isActive = activeTab === item.id
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => setActiveTab(item.id)}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all pl-11
-                          ${
-                            isActive
-                              ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
-                              : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
-                          }`}
-                      >
-                        {/* 选中时显示圆点，或可改为图标 */}
-                        {item.icon ? (
-                          <item.icon
-                            size={16}
-                            className={isActive ? 'text-white' : 'text-zinc-400'}
-                          />
-                        ) : (
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full transition-colors ${isActive ? 'bg-white' : 'bg-zinc-300'}`}
-                          />
-                        )}
-                        <span>{item.label}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-
-        {/* 底部信息 (可选) */}
-        <div className="p-4 border-t border-zinc-50 text-center">
-          <p className="text-xs text-zinc-300 font-mono">v1.2.0</p>
+          {/* 新增：消息通知按钮 */}
+          <button
+            onClick={() => setActiveTab('notification')}
+            className={`flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all text-base font-medium ${activeTab === 'notification' ? 'bg-blue-50 text-blue-600 shadow-sm' : 'text-zinc-500 hover:bg-zinc-50'}`}
+          >
+            <Bell size={20} /> <span>消息通知中心</span>
+          </button>
         </div>
       </div>
 
@@ -902,18 +812,15 @@ export default function App() {
           />
         </div>
 
-        {activeTab === 'auto_roi_rules' && (
-          <div className="h-full w-full">
-            <AutoRoiRulesView />
-          </div>
-        )}
+        <div
+          className="h-full w-full"
+          style={{ display: activeTab === 'auto_roi' ? 'block' : 'none' }}
+        >
+          <AutoRoiView />
+        </div>
 
-        {activeTab === 'auto_roi_logs' && (
-          <div className="h-full w-full">
-            <AutoRoiLogsView />
-          </div>
-        )}
-
+        {/* [修改] 消息通知页面改为条件渲染 */}
+        {/* 这样当切换到其他 Tab 时，NotificationView 会被销毁，未保存的状态将重置 */}
         {activeTab === 'notification' && (
           <div className="h-full w-full">
             <NotificationView />
